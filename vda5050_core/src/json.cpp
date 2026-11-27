@@ -3,6 +3,7 @@
 
 #include "vda5050_core/json.hpp"
 
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -329,7 +330,7 @@ void dump_number(double value, std::string & out)
   char buffer[32];
   // Integers print without a fraction so ids look like 42, not 42.0 or 4.2e+01.
   if (value == std::floor(value) && std::fabs(value) < 9.0e15) {
-    std::snprintf(buffer, sizeof(buffer), "%lld", static_cast<long long>(value));
+    std::snprintf(buffer, sizeof(buffer), "%" PRId64, static_cast<std::int64_t>(value));
   } else {
     std::snprintf(buffer, sizeof(buffer), "%.17g", value);  // round-trips any double
   }

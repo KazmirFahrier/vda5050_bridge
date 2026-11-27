@@ -13,7 +13,8 @@ using namespace vda5050_core;  // NOLINT(build/namespaces)
 namespace
 {
 
-const char kOrderJson[] = R"({
+const char kOrderJson[] =
+  R"({
   "headerId": 7,
   "timestamp": "2026-11-26T19:50:00.000Z",
   "version": "2.0.0",

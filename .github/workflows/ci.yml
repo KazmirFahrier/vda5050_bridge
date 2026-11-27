@@ -55,28 +55,6 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
-      - name: Lint report (temporary)
-        shell: bash
-        continue-on-error: true
-        run: |
-          apt-get install -y ros-jazzy-ament-uncrustify ros-jazzy-ament-cpplint ros-jazzy-ament-flake8 ros-jazzy-ament-pep257 ros-jazzy-ament-xmllint ros-jazzy-ament-lint-cmake >/dev/null
-          source /opt/ros/jazzy/setup.bash
-          cd src/vda5050_bridge
-          git config --global --add safe.directory "$PWD"
-          mkdir -p /tmp/lint
-          FILES=$(git ls-files '*.cpp' '*.hpp' | grep -v test/support/shim)
-          ament_uncrustify --reformat $FILES > /tmp/lint/uncrustify.txt 2>&1 || true
-          git diff > /tmp/lint/uncrustify.patch
-          git checkout -- .
-          ament_cpplint $FILES > /tmp/lint/cpplint.txt 2>&1 || true
-          ament_flake8 . > /tmp/lint/flake8.txt 2>&1 || true
-          ament_pep257 . > /tmp/lint/pep257.txt 2>&1 || true
-          ament_xmllint . > /tmp/lint/xmllint.txt 2>&1 || true
-          ament_lint_cmake . > /tmp/lint/lint_cmake.txt 2>&1 || true
-          wc -l /tmp/lint/*
-          echo "LINT-ARCHIVE-BEGIN"
-          tar czf - -C /tmp lint | base64 -w 120
-          echo "LINT-ARCHIVE-END"
       - name: Integration test (real broker, fake Nav2)
         shell: bash
         run: |

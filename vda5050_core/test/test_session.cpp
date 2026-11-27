@@ -47,7 +47,9 @@ public:
 const char kOrderTopic[] = "uagv/v2/acme/amr-001/order";
 const char kInstantTopic[] = "uagv/v2/acme/amr-001/instantActions";
 
-std::string header_json(const std::string & serial = "amr-001", const std::string & version = "2.0.0")
+std::string header_json(
+  const std::string & serial = "amr-001",
+  const std::string & version = "2.0.0")
 {
   return R"("headerId":1,"timestamp":"2026-11-26T20:00:00.000Z","version":")" + version +
          R"(","manufacturer":"acme","serialNumber":")" + serial + R"(",)";

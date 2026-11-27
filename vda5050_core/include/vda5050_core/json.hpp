@@ -56,18 +56,24 @@ public:
 
   Json() = default;  // null
   Json(std::nullptr_t) {}  // NOLINT(runtime/explicit)
-  Json(bool value) : value_(value) {}  // NOLINT(runtime/explicit)
-  Json(const char * value) : value_(std::string(value)) {}  // NOLINT(runtime/explicit)
-  Json(std::string value) : value_(std::move(value)) {}  // NOLINT(runtime/explicit)
-  Json(Array value) : value_(std::move(value)) {}  // NOLINT(runtime/explicit)
-  Json(Object value) : value_(std::move(value)) {}  // NOLINT(runtime/explicit)
+  Json(bool value)
+  : value_(value) {}                   // NOLINT(runtime/explicit)
+  Json(const char * value)
+  : value_(std::string(value)) {}                           // NOLINT(runtime/explicit)
+  Json(std::string value)
+  : value_(std::move(value)) {}                          // NOLINT(runtime/explicit)
+  Json(Array value)
+  : value_(std::move(value)) {}                    // NOLINT(runtime/explicit)
+  Json(Object value)
+  : value_(std::move(value)) {}                     // NOLINT(runtime/explicit)
 
   /// Any arithmetic type except bool becomes a JSON number (stored as double,
   /// which represents every integer up to 2^53 exactly: enough for uint32 ids).
   template<
     typename T,
     typename = std::enable_if_t<std::is_arithmetic_v<T>&& !std::is_same_v<T, bool>>>
-  Json(T value) : value_(static_cast<double>(value)) {}  // NOLINT(runtime/explicit)
+  Json(T value)
+  : value_(static_cast<double>(value)) {}                // NOLINT(runtime/explicit)
 
   bool is_null() const noexcept {return std::holds_alternative<std::nullptr_t>(value_);}
   bool is_bool() const noexcept {return std::holds_alternative<bool>(value_);}
