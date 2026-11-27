@@ -10,6 +10,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -26,10 +27,14 @@ public:
   using GoalHandle = rclcpp_action::ClientGoalHandle<NavigateToPose>;
   /// Called exactly once per navigate_to(): success, or failure with a reason.
   using ResultCallback = std::function<void (bool success, const std::string & reason)>;
+  /// Returns the robot's current (x, y) in the global frame, or nothing if it
+  /// is not localised.
+  using PositionProvider = std::function<std::optional<std::pair<double, double>>()>;
 
   Nav2NavigationAdapter(
     rclcpp_lifecycle::LifecycleNode & node, const std::string & action_name,
-    const std::string & global_frame, ResultCallback on_result);
+    const std::string & global_frame, ResultCallback on_result,
+    PositionProvider current_position);
 
   void navigate_to(const vda5050_core::Node & target, const vda5050_core::Edge & via) override;
   void cancel() override;
@@ -43,6 +48,7 @@ private:
   rclcpp_lifecycle::LifecycleNode & node_;
   std::string global_frame_;
   ResultCallback on_result_;
+  PositionProvider current_position_;
   rclcpp_action::Client<NavigateToPose>::SharedPtr client_;
 
   std::optional<vda5050_core::Node> target_;

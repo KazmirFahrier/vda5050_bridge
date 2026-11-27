@@ -26,9 +26,6 @@ What has **not** been done:
   moves into the path. Navigation failure is tested only for a goal Nav2
   refuses at once (a node off the map).
 - Broker outages are implemented but not exercised against a real broker.
-- One open observation: the first leg after start-up takes about 46 s in both
-  simulators, with Nav2's controller reporting "Failed to make progress" four
-  times before it completes. Later legs take seconds. Not yet diagnosed.
 - No automated validation against the official JSON schemas; field names were
   checked by reading the published v2.0 schemas.
 - The launch file has not been executed (tests start the executable directly).

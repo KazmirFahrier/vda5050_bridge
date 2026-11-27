@@ -116,7 +116,7 @@ the real ones), then:
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
 | ofail: A -> X, with X off the map | Nav2 fails the goal; state shows a `FATAL` `navigationError`, not driving, X still listed ahead; no retry. `cancelOrder` clears it; a fresh order from the robot's position completes and the error list is empty again |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
-| o4: current position -> D, a point between four pillars | Completes with no errors; reported position within tolerance of D |
+| o4: back to A, then to D, a point between four pillars | Completes with no errors; reported position within tolerance of D; time and Nav2 controller stalls are printed |
 
 The same script runs in two modes:
 
@@ -132,6 +132,11 @@ nearest obstacle about 0.5 m), and simulation time is advancing.
 In the recorded CI runs the robot stopped 0.17 to 0.24 m from each target node.
 That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
 deployment needs to set it tighter than the fleet manager's `allowedDeviationXY`.
+
+Goal heading: when a node gives no `theta`, the adapter asks Nav2 to arrive
+facing the direction of travel, measured from the robot's current position. An
+earlier version used a fixed heading for the first leg, which made Nav2's
+controller stall for about 40 s; see `docs/testing.md`.
 
 What the first real build found, for the record: a missing rosdep key for
 libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
