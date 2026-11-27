@@ -1,5 +1,3 @@
-# NOTE: this workflow has been written but never executed. Expect to adjust it
-# on the first run. See docs/testing.md ("What has NOT been verified").
 name: CI
 
 on:
@@ -42,6 +40,8 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
+          # libmosquitto has no rosdep key, so it is installed directly.
+          apt-get install -y libmosquitto-dev
           rosdep update
           rosdep install --from-paths src --ignore-src -y
       - name: Build
@@ -55,3 +55,10 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
+      - name: Integration test (real broker, fake Nav2)
+        shell: bash
+        run: |
+          apt-get install -y mosquitto mosquitto-clients
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh

@@ -12,6 +12,7 @@
 #ifndef VDA5050_NAV2_ADAPTER__MOSQUITTO_TRANSPORT_HPP_
 #define VDA5050_NAV2_ADAPTER__MOSQUITTO_TRANSPORT_HPP_
 
+#include <condition_variable>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -60,7 +61,9 @@ public:
   /// Returns false if the client could not be started at all.
   bool connect();
 
-  /// Send DISCONNECT and stop the network thread.
+  /// Wait briefly for messages already handed to the client to reach the
+  /// broker (so a final OFFLINE is not lost), then send DISCONNECT and stop
+  /// the network thread.
   void disconnect();
 
   /// Thread-safe. Messages published while offline are dropped by design:
@@ -74,6 +77,7 @@ private:
   static void on_connect(struct mosquitto *, void * self, int result_code);
   static void on_disconnect(struct mosquitto *, void * self, int result_code);
   static void on_message(struct mosquitto *, void * self, const struct mosquitto_message * message);
+  static void on_publish(struct mosquitto *, void * self, int message_id);
   void push(TransportEvent event);
 
   Options options_;
@@ -83,6 +87,8 @@ private:
 
   std::mutex mutex_;
   std::vector<TransportEvent> events_;
+  int in_flight_{0};  ///< Publishes accepted by the client but not yet sent/acknowledged.
+  std::condition_variable in_flight_changed_;
 };
 
 }  // namespace vda5050_nav2_adapter

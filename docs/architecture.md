@@ -17,13 +17,13 @@ flowchart LR
     subgraph outside1 [Master control side]
         MQTT[(MQTT broker)]
     end
-    subgraph adapter [vda5050_nav2_adapter - written, not yet compiled]
+    subgraph adapter [vda5050_nav2_adapter]
         T[MosquittoTransport]
         N[Nav2NavigationAdapter]
         A[TopicActionHandler]
         L[AdapterNode: lifecycle, timer, parameters, telemetry]
     end
-    subgraph core [vda5050_core - built and tested]
+    subgraph core [vda5050_core]
         S[Session]
         C[codec]
         V[order_validator]
@@ -172,7 +172,7 @@ the party that needs to know is master control, not a C++ caller.
 
 ## The ROS 2 adapter
 
-`vda5050_nav2_adapter` (written, not yet compiled) contains one class per port
+`vda5050_nav2_adapter` contains one class per port
 plus the node that wires them:
 
 | Class | Role |

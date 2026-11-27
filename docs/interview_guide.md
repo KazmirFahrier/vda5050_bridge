@@ -18,8 +18,8 @@ as the rest; interviewers probe exactly there.
 > 96 unit tests that run in milliseconds. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
-Say the last sentence only once the adapter has actually been built and run.
-Until then: "the ROS 2 adapter is written but I have not built it yet".
+The whole thing builds in CI on ROS 2 Jazzy, and an integration test runs the
+node against a real MQTT broker with a fake Nav2 action server.
 
 ## 2-minute version: add these three points
 
@@ -115,6 +115,15 @@ port calls and the published state. No sleeps, no threads. See `testing.md`.
 I injected four bugs and confirmed each made a test fail. That is a spot check;
 systematic mutation testing and coverage measurement are not done yet.
 
+**Tell me about a bug you found.**
+Three good ones, all in `docs/testing.md`. AddressSanitizer caught a
+use-after-free in a test that passed silently without it. The first real ROS
+build flagged a range-for over a member of a destroyed temporary
+(`-Wdangling-reference`). And writing the integration test exposed that Ctrl-C
+left a retained `ONLINE` on the broker, because the process exited without
+announcing `OFFLINE`. The lesson in each: the bug was found by a tool or a test
+at a boundary, not by reading the code.
+
 **Fakes vs mocks?**
 A fake is a simple working stand-in whose state you inspect afterwards. A mock
 has expectations set up front. Fakes keep tests about outcomes, not about the
@@ -167,11 +176,11 @@ periodic rule testable with a fake clock (ADR-014).
 
 State these before you are asked.
 
-- The core is built and tested. The ROS 2 adapter is written but has never been
-  compiled, and nothing has run on a robot, in a simulator, or against a real
-  fleet manager or broker.
-- Tests ran with a GoogleTest-compatible shim, not real GoogleTest; the colcon
-  build and CI workflow have not been executed.
+- It has never run against real Nav2, a simulator, a robot or a real fleet
+  manager. The integration test uses a fake action server that always succeeds
+  and a script in place of master control.
+- The adapter's failure paths (rejected or aborted goals, cancel, pause) are
+  implemented but untested.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

@@ -183,8 +183,8 @@ the macros the tests use.
 **Why.** The tests could be executed on a machine with no GoogleTest, while
 remaining ordinary GoogleTest tests for ROS 2 CI.
 
-**Cost.** The shim prints less on failure, and until the suite has run under
-real GoogleTest there is a small risk of a construct that the shim accepts and
+**Cost.** The shim prints less on failure. CI runs the suite under real
+GoogleTest, which is what guards against a construct the shim accepts and
 GoogleTest does not.
 
 ---

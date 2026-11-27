@@ -1,6 +1,3 @@
-# STATUS: this package has been written but NOT yet compiled. No ROS 2
-# installation was available where it was authored. Expect to fix build
-# errors on the first colcon build. See README.md in this directory.
 cmake_minimum_required(VERSION 3.16)
 project(vda5050_nav2_adapter)
 

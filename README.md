@@ -10,20 +10,22 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 
 ## Status
 
-Two packages, at very different levels of verification. Read this table before
-relying on either.
+[![CI](https://github.com/KazmirFahrier/vda5050_bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/KazmirFahrier/vda5050_bridge/actions/workflows/ci.yml)
 
 | Package | What it is | Verification |
 |---|---|---|
-| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | **Built and tested.** 96 unit tests and one end-to-end example pass with GCC and Clang, including under AddressSanitizer/UBSan |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | **Written, never compiled.** No ROS 2 installation was available. It was only syntax-checked against hand-written stand-in headers. Expect build errors on the first `colcon build` |
+| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 96 unit tests and one end-to-end example. Pass in CI with GCC and Clang under AddressSanitizer/UBSan, and under colcon on ROS 2 Jazzy |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. One integration test in CI runs the node against a real Mosquitto broker with a fake `NavigateToPose` server |
 
-Also not yet done, for either package:
+What has **not** been done:
 
-- The tests ran with the bundled GoogleTest-compatible shim, not real GoogleTest.
-- Nothing has been built with colcon; the CI workflow has never run.
-- Nothing has been exchanged with a real MQTT broker, fleet manager, simulator
-  or robot. JSON field names were checked by reading the published v2.0 schemas.
+- No run against real Nav2, a simulator or a physical robot. Navigation is
+  exercised only through a fake action server that always succeeds.
+- No run against a real fleet manager. Master control is played by a script.
+- No automated validation against the official JSON schemas; field names were
+  checked by reading the published v2.0 schemas.
+- The adapter has no unit tests of its own, only the one integration test.
+- The launch file has not been executed (the test starts the executable directly).
 
 Details: [docs/testing.md](docs/testing.md).
 
@@ -33,7 +35,7 @@ Details: [docs/testing.md](docs/testing.md).
 vda5050_bridge/
 ├── README.md
 ├── LICENSE                         Apache-2.0
-├── .github/workflows/ci.yml        CI definition (never run)
+├── .github/workflows/ci.yml        CI: standalone build x2 compilers, colcon build, integration test
 ├── docs/
 │   ├── vda5050_primer.md           The protocol, explained from scratch
 │   ├── architecture.md             How the code is structured and why
@@ -54,8 +56,8 @@ vda5050_bridge/
 │   ├── src/
 │   ├── test/
 │   └── examples/simulated_vehicle.cpp   Runnable demo: no ROS, no broker
-└── vda5050_nav2_adapter/           ament_cmake package (UNBUILT)
-    ├── README.md                   Interfaces, parameters, first-build checklist
+└── vda5050_nav2_adapter/           ament_cmake package
+    ├── README.md                   Interfaces, parameters, how to run
     ├── include/vda5050_nav2_adapter/
     │   ├── adapter_node.hpp        Lifecycle node
     │   ├── nav2_navigation_adapter.hpp   NavigationPort -> NavigateToPose
@@ -63,7 +65,8 @@ vda5050_bridge/
     │   └── topic_action_handler.hpp      ActionPort -> ROS topics
     ├── src/
     ├── config/adapter.yaml
-    └── launch/adapter.launch.py
+    ├── launch/adapter.launch.py
+    └── test/                       Integration test: real broker, fake Nav2
 ```
 
 ## Try it without ROS
@@ -93,13 +96,14 @@ master -> order o1/1: releases N1 -> N2
   vehicle -> state  order=o1/1 lastNode=N2 driving=no nodesAhead=0 newBaseRequest=no [pick:FINISHED]
 ```
 
-## Build with ROS 2 (intended; not yet verified)
+## Build with ROS 2
 
-Target: ROS 2 Jazzy on Ubuntu 24.04, with Nav2 and an MQTT broker such as Mosquitto.
+Target: ROS 2 Jazzy on Ubuntu 24.04. These are the commands CI runs.
 
 ```bash
-cd ~/ros2_ws/src && git clone <this repository>
+cd ~/ros2_ws/src && git clone https://github.com/KazmirFahrier/vda5050_bridge.git
 cd ~/ros2_ws
+sudo apt-get install -y libmosquitto-dev      # no rosdep key exists for it
 rosdep install --from-paths src --ignore-src -y
 colcon build
 colcon test && colcon test-result --verbose
@@ -107,8 +111,11 @@ source install/setup.bash
 ros2 launch vda5050_nav2_adapter adapter.launch.py
 ```
 
-See [vda5050_nav2_adapter/README.md](vda5050_nav2_adapter/README.md) for the
-first-build checklist.
+To run the integration test locally (needs `mosquitto` and `mosquitto-clients`):
+
+```bash
+bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
+```
 
 ## Where to start reading
 
