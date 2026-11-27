@@ -155,8 +155,10 @@ Five scenarios:
 4. **A -> C, cancelled.** While driving, `cancelOrder`: the cancel action
    reaches `FINISHED`, the vehicle is stopped, the route is cleared, no error is
    raised and C is not reached.
-5. **To D, a point in the middle of four pillars.** About 2.5 m, passing
-   between two pillars. Completes with no errors.
+5. **To D, a point in the middle of four pillars.** The robot first returns
+   to A, then drives about 2.5 m, passing between two pillars. Completes with
+   no errors; the script prints the time taken and how often Nav2's controller
+   stalled on the way.
 
 ### Proving the Gazebo run is real
 
@@ -179,6 +181,7 @@ Nav2 log.
 | Cleanup killed the test itself | `pkill -f nav2` matched the script's own name: every check passed and the CI step went red |
 | Stopping distance | The robot stops 0.17 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
 | Slow first leg (fixed) | The first 0.5 m leg took about 45 s, with Nav2's controller logging "Failed to make progress" four times. Cause, found by logging the goal the adapter sent and tracing the robot's pose: for a first leg without `theta` the adapter asked for heading 0. The robot, facing east, was told to reach a node 0.5 m to its north and end up facing east again; the controller stalled until a spin recovery turned it. The heading is now the direction of travel from the robot's current position. The leg takes 4 s in both simulators, and the test fails if it is slow or if Nav2 logs any progress failure |
+| Nav2 stalling in a tight gap (observed once, not an adapter fault) | In one Gazebo run the robot approached the gap between two pillars at an angle, from wherever a cancelled order had left it. Nav2's controller failed its progress check 8 times and ran spin, wait and back-up recoveries before getting through; the leg took 100 s where it normally takes 8. The adapter kept the order in progress and reported completion with no errors, which is the correct behaviour. The scenario now starts from a fixed node, so the approach is the same every run. The gap leaves under 0.2 m clearance each side with Nav2's default parameters |
 
 ## What the first real build found
 
@@ -213,8 +216,10 @@ Read this before claiming more than is true.
   static. Failure after the vehicle has started moving, with Nav2's recovery
   behaviours running first, is not exercised.
 - **A physical robot.**
-- **Repeatability of the Gazebo job.** It has passed in each CI run so far, a
-  small sample. Physics simulation on shared CI machines can be flaky.
+- **Repeatability of the Gazebo job.** A small sample of CI runs. One run
+  needed 100 s and several Nav2 recoveries for the pillar scenario (see above).
+  Physics simulation on shared CI machines can be flaky, and a run where Nav2
+  gives up in the gap would fail the test.
 - **A real fleet manager.** Master control is a shell script.
 - **The launch file** has not been executed; the test starts the binary directly.
 - **Reconnect behaviour** after a broker outage (implemented in the core and

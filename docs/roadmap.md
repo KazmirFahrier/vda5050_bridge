@@ -14,6 +14,8 @@
 - Ship a recommended Nav2 parameter file, with a goal tolerance tighter than
   the default 0.25 m so the vehicle stops within the fleet manager's
   `allowedDeviationXY`
+- Tune the controller for turning on the spot and for narrow gaps: with the
+  default parameters it stalled once in the pillar gap before recovering
 
 ### 2. Harder scenarios
 - An obstacle spawned in the path while driving: expect Nav2 recoveries, then
