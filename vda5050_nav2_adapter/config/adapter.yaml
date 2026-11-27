@@ -1,0 +1,47 @@
+# Example parameters for the VDA 5050 adapter.
+vda5050_adapter:
+  ros__parameters:
+    # Identity on the VDA 5050 network. Topics become
+    #   <interface_name>/v<major>/<manufacturer>/<serial_number>/<topic>
+    manufacturer: "acme"
+    serial_number: "amr-001"
+    interface_name: "uagv"
+    protocol_version: "2.0.0"
+
+    mqtt:
+      host: "localhost"
+      port: 1883
+      keepalive_s: 15
+      username: ""
+      # Do not commit real credentials. Prefer passing this at launch time.
+      password: ""
+
+    # mapId reported in agvPosition and expected in order nodePositions.
+    map_id: "map"
+    global_frame: "map"
+    base_frame: "base_link"
+    navigate_action: "navigate_to_pose"
+    battery_topic: "battery_state"
+    odometry_topic: "odom"
+
+    update_rate_hz: 20.0            # how often MQTT events are processed and state is checked
+    state_interval_s: 30.0          # heartbeat state when nothing changes
+    visualization_interval_s: 1.0   # 0 disables the visualization topic
+    default_deviation_xy: 0.5       # metres; used when a node gives no allowedDeviationXY
+
+    # Action types this robot can execute. Each is forwarded on ~/action_request.
+    supported_actions: ["pick", "drop"]
+
+    factsheet:
+      series_name: "generic_amr"
+      agv_kinematic: "DIFF"         # DIFF, OMNI or THREEWHEEL
+      agv_class: "CARRIER"          # FORKLIFT, CONVEYOR, TUGGER or CARRIER
+      max_load_mass: 100.0
+      speed_max: 1.0
+      acceleration_max: 1.0
+      deceleration_max: 1.0
+      height_max: 0.5
+      width: 0.5
+      length: 0.7
+
+    autostart: true
