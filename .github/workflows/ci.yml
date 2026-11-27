@@ -166,3 +166,21 @@ jobs:
           --print-summary --fail-under-line 95
           build/CMakeFiles/vda5050_core.dir
 
+  fuzz:
+    name: Fuzz the JSON parser and decoders (60 s)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Clang with libFuzzer
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-rt-dev
+      - name: Build the fuzz target
+        run: >
+          clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined
+          -fno-sanitize-recover=undefined
+          -Ivda5050_core/include vda5050_core/fuzz/fuzz_decoder.cpp vda5050_core/src/*.cpp
+          -o fuzz_decoder
+      - name: Fuzz
+        run: |
+          mkdir corpus && cp vda5050_core/test/data/*.json corpus/
+          ./fuzz_decoder -max_total_time=60 -max_len=8192 -print_final_stats=1 corpus
+

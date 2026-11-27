@@ -13,6 +13,9 @@
 #   - the broker dies and comes back while an order is being driven
 #   - the adapter is stopped cleanly (must announce OFFLINE)
 #   - the adapter is killed (the broker must publish the last will)
+# and finally the lifecycle: the node is started inactive and driven through
+# configure / activate / deactivate / cleanup from outside, as a lifecycle
+# manager would.
 #
 # This script plays master control with mosquitto_pub and checks what the
 # vehicle publishes. Run it with ROS 2 and the workspace sourced.
@@ -189,6 +192,48 @@ wait_for_new "vehicle is ONLINE again" 20 \
 kill -9 "$CRASH_PID"
 wait_for_new "broker publishes the last will: CONNECTIONBROKEN" 30 \
   "^${PREFIX}/connection .*\"connectionState\":\"CONNECTIONBROKEN\""
+
+echo "== lifecycle transitions driven from outside =="
+transition() {  # transition <name>
+  ros2 lifecycle set /vda5050_adapter "$1" 2>&1 | grep -q "Transitioning successful" \
+    || fail "lifecycle transition '$1' was not successful"
+}
+expect_connection() {  # expect_connection <description> <ONLINE|OFFLINE>
+  wait_for_new "$1" 20 "^${PREFIX}/connection .*\"connectionState\":\"$2\""
+}
+"$ADAPTER_BIN" --ros-args --params-file "$PARAMS" -p autostart:=false & MANAGED_PID=$!
+PIDS+=("$MANAGED_PID")
+for _ in $(seq 1 50); do
+  ros2 lifecycle get /vda5050_adapter 2>/dev/null | grep -q "^unconfigured" && break
+  sleep 0.2
+done
+
+mark
+transition configure
+sleep 2
+if tail -n +"$((MARK + 1))" "$LOG" | grep -q "\"connectionState\":\"ONLINE\""; then
+  fail "node went ONLINE on configure; it must wait for activate"
+fi
+echo "ok: configure alone does not connect"
+transition activate
+expect_connection "activate: ONLINE" ONLINE
+mark
+transition deactivate
+expect_connection "deactivate: OFFLINE" OFFLINE
+mark
+transition activate
+expect_connection "activate again: ONLINE" ONLINE
+mark
+transition deactivate
+expect_connection "deactivate again: OFFLINE" OFFLINE
+transition cleanup
+mark
+transition configure
+transition activate
+expect_connection "configure and activate after cleanup: ONLINE" ONLINE
+mark
+kill -INT "$MANAGED_PID"
+expect_connection "SIGINT while active: OFFLINE" OFFLINE
 
 echo "PASS: integration test"
 exit 0
