@@ -355,3 +355,88 @@ TEST(Codec, EncodesFactsheetWithSchemaRequiredFields)
   EXPECT_EQ(action.find("actionScopes")->as_array().size(), 2u);
   EXPECT_EQ(action.find("actionDescription")->as_string(), "lift a load");
 }
+
+TEST(Codec, ReportsWrongTypesWithTheirPath)
+{
+  std::string payload = kOrderJson;
+  payload.replace(payload.find("\"released\": true"), 16, "\"released\": \"yes\"");
+  EXPECT_TRUE(contains(order_error(payload), "order.nodes[0].released: expected boolean"));
+
+  payload = kOrderJson;
+  payload.replace(payload.find("\"edges\": ["), 10, "\"edges\": {\"x\": [");
+  payload += "}";
+  EXPECT_TRUE(contains(order_error(payload), "order.edges: expected array"));
+
+  payload = kOrderJson;
+  const std::string parameters = "\"actionParameters\": [";
+  payload.replace(payload.find(parameters), parameters.size(), "\"actionParameters\": 5, \"x\": [");
+  EXPECT_TRUE(
+    contains(order_error(payload), "order.nodes[1].actions[0].actionParameters: expected array"));
+}
+
+TEST(Codec, EnumNamesMatchTheSpecification)
+{
+  EXPECT_EQ(std::string(to_string(BlockingType::None)), "NONE");
+  EXPECT_EQ(std::string(to_string(BlockingType::Soft)), "SOFT");
+  EXPECT_EQ(std::string(to_string(BlockingType::Hard)), "HARD");
+
+  EXPECT_EQ(std::string(to_string(ActionStatus::Waiting)), "WAITING");
+  EXPECT_EQ(std::string(to_string(ActionStatus::Initializing)), "INITIALIZING");
+  EXPECT_EQ(std::string(to_string(ActionStatus::Running)), "RUNNING");
+  EXPECT_EQ(std::string(to_string(ActionStatus::Paused)), "PAUSED");
+  EXPECT_EQ(std::string(to_string(ActionStatus::Finished)), "FINISHED");
+  EXPECT_EQ(std::string(to_string(ActionStatus::Failed)), "FAILED");
+
+  EXPECT_EQ(std::string(to_string(ErrorLevel::Warning)), "WARNING");
+  EXPECT_EQ(std::string(to_string(ErrorLevel::Fatal)), "FATAL");
+
+  EXPECT_EQ(std::string(to_string(OperatingMode::Automatic)), "AUTOMATIC");
+  EXPECT_EQ(std::string(to_string(OperatingMode::Semiautomatic)), "SEMIAUTOMATIC");
+  EXPECT_EQ(std::string(to_string(OperatingMode::Manual)), "MANUAL");
+  EXPECT_EQ(std::string(to_string(OperatingMode::Service)), "SERVICE");
+  EXPECT_EQ(std::string(to_string(OperatingMode::Teachin)), "TEACHIN");
+
+  EXPECT_EQ(std::string(to_string(EStop::Autoack)), "AUTOACK");
+  EXPECT_EQ(std::string(to_string(EStop::Manual)), "MANUAL");
+  EXPECT_EQ(std::string(to_string(EStop::Remote)), "REMOTE");
+  EXPECT_EQ(std::string(to_string(EStop::None)), "NONE");
+
+  EXPECT_EQ(std::string(to_string(ConnectionState::Online)), "ONLINE");
+  EXPECT_EQ(std::string(to_string(ConnectionState::Offline)), "OFFLINE");
+  EXPECT_EQ(std::string(to_string(ConnectionState::ConnectionBroken)), "CONNECTIONBROKEN");
+}
+
+TEST(Codec, EncodesOptionalStateFieldsWhenSet)
+{
+  State state;
+  state.zone_set_id = "zones-a";
+  state.velocity = Velocity{0.4, 0.0, -0.2};
+  state.battery_state.battery_voltage = 25.2;
+  NodePosition position;
+  position.x = 1.0;
+  position.map_id = "m";
+  position.theta = 0.5;
+  position.allowed_deviation_xy = 0.3;
+  position.allowed_deviation_theta = 0.1;
+  state.node_states.push_back(NodeState{"N1", 2, true, position});
+  state.operating_mode = OperatingMode::Semiautomatic;
+  state.safety_state.e_stop = EStop::Remote;
+
+  const Json json = Json::parse(encode_state(state));
+  EXPECT_EQ(json.find("zoneSetId")->as_string(), "zones-a");
+  EXPECT_DOUBLE_EQ(json.find("velocity")->find("vx")->as_number(), 0.4);
+  EXPECT_DOUBLE_EQ(json.find("batteryState")->find("batteryVoltage")->as_number(), 25.2);
+  const Json * node_position = json.find("nodeStates")->as_array()[0].find("nodePosition");
+  ASSERT_NE(node_position, nullptr);
+  EXPECT_DOUBLE_EQ(node_position->find("allowedDeviationXY")->as_number(), 0.3);
+  EXPECT_DOUBLE_EQ(node_position->find("allowedDeviationTheta")->as_number(), 0.1);
+  EXPECT_DOUBLE_EQ(node_position->find("theta")->as_number(), 0.5);
+  EXPECT_EQ(json.find("operatingMode")->as_string(), "SEMIAUTOMATIC");
+  EXPECT_EQ(json.find("safetyState")->find("eStop")->as_string(), "REMOTE");
+
+  Factsheet factsheet;
+  factsheet.visualization_interval = 1.0;
+  EXPECT_DOUBLE_EQ(
+    Json::parse(encode_factsheet(factsheet)).find("protocolLimits")->find("timing")
+    ->find("visualizationInterval")->as_number(), 1.0);
+}

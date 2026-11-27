@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <string>
 
 #include "vda5050_core/json.hpp"
@@ -127,4 +128,39 @@ TEST(Json, TypeMismatchThrowsLogicError)
   EXPECT_THROW(number.as_string(), JsonTypeError);
   EXPECT_THROW(number.as_array(), JsonTypeError);
   EXPECT_EQ(number.find("key"), nullptr);  // find() on a non-object is safe
+}
+
+TEST(Json, DecodesAndEncodesEveryEscape)
+{
+  EXPECT_EQ(Json::parse(R"("\b\f\r")").as_string(), "\b\f\r");
+  EXPECT_EQ(Json("\b\f\r\t").dump(), R"("\b\f\r\t")");
+  // One-, two- and three-byte UTF-8 from \u escapes, with upper-case hex digits.
+  EXPECT_EQ(Json::parse(R"("\u0041")").as_string(), "A");
+  EXPECT_EQ(Json::parse(R"("\u00E9")").as_string(), "\xC3\xA9");
+  EXPECT_EQ(Json::parse(R"("\u20AC")").as_string(), "\xE2\x82\xAC");
+}
+
+TEST(Json, RejectsBrokenEscapesAndStructure)
+{
+  EXPECT_THROW(Json::parse(R"("\u12")"), JsonParseError);       // truncated
+  EXPECT_THROW(Json::parse(R"("\u12G4")"), JsonParseError);     // not hex
+  EXPECT_THROW(Json::parse("\"abc\\"), JsonParseError);        // ends inside an escape
+  EXPECT_THROW(Json::parse(R"("\ud83d\u0041")"), JsonParseError);  // high surrogate + non-surrogate
+  EXPECT_THROW(Json::parse(R"("\ude00")"), JsonParseError);     // low surrogate alone
+  EXPECT_THROW(Json::parse(R"({"a" 1})"), JsonParseError);      // missing colon
+  EXPECT_THROW(Json::parse(R"({"a":1 "b":2})"), JsonParseError);  // missing comma
+  EXPECT_THROW(Json::parse("[1 2]"), JsonParseError);
+}
+
+TEST(Json, NonFiniteNumbersAreWrittenAsNull)
+{
+  EXPECT_EQ(Json(std::numeric_limits<double>::quiet_NaN()).dump(), "null");
+  EXPECT_EQ(Json(std::numeric_limits<double>::infinity()).dump(), "null");
+}
+
+TEST(Json, BuilderRejectsWrongContainerType)
+{
+  Json number(1);
+  EXPECT_THROW(number["key"], JsonTypeError);
+  EXPECT_THROW(number.push_back(Json(2)), JsonTypeError);
 }
