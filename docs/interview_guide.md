@@ -180,8 +180,8 @@ State these before you are asked.
 - It has never run with a physics simulator, on a robot, or against a real
   fleet manager. The Nav2 test uses Nav2's loopback simulator (no sensors,
   localisation or obstacles) and a script in place of master control.
-- Navigation failure paths (rejected or aborted goals) are implemented but
-  untested.
+- Navigation failure is tested only for a goal Nav2 refuses outright; a path
+  blocked part-way is not.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

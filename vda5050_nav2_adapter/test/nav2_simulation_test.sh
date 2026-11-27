@@ -173,11 +173,14 @@ sleep 1.5
 expect_position "robot really is at A" "$AX" "$AY" 0.4
 
 echo "== 3. order ofail: A -> X, a node Nav2 cannot reach =="
-# X lies far outside the map, so the planner can never produce a path. Nav2
-# works through its recovery behaviours first, then aborts the goal.
+# X lies far outside the map, so Nav2 can never produce a path and gives up.
 send order "{${HEADER},\"orderId\":\"ofail\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node X 2 50.0 50.0)],\"edges\":[$(edge AX 1 A X)]}"
 wait_for "Nav2 gave up: FATAL navigationError, halted, X still listed ahead" 240 \
   "^${PREFIX}/state .*\"driving\":false.*\"errorLevel\":\"FATAL\".*\"errorType\":\"navigationError\".*\"lastNodeId\":\"A\".*\"nodeStates\":\[\{.*\"orderId\":\"ofail\""
+grep -E "^${PREFIX}/state .*\"errorType\":\"navigationError\"" "$LOG" | tail -n 1 | python3 -c "
+import json, sys
+state = json.loads(sys.stdin.readline().split(' ', 1)[1])
+print('   reported error:', state['errors'][0]['errorDescription'])"
 sleep 3
 if grep -E "^${PREFIX}/state .*\"orderId\":\"ofail\"" "$LOG" | tail -n 1 | grep -q '"driving":true'; then
   fail "vehicle retried the failed leg on its own"

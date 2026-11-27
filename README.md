@@ -15,7 +15,7 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 | Package | What it is | Verification |
 |---|---|---|
 | `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 96 unit tests and one end-to-end example. Pass in CI with GCC and Clang under AddressSanitizer/UBSan, and under colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Two tests in CI: an integration test (real Mosquitto broker, fake Nav2) and a system test that drives orders through the **real Nav2 stack** with a simulated robot, including pause/resume and cancel |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Two tests in CI: an integration test (real Mosquitto broker, fake Nav2) and a system test that drives orders through the **real Nav2 stack** with a simulated robot, including pause/resume, cancel, and a navigation failure with recovery |
 
 What has **not** been done:
 
@@ -23,7 +23,8 @@ What has **not** been done:
   Nav2's loopback simulator: velocity commands become motion directly, with no
   sensors, localisation error or obstacles.
 - No run against a real fleet manager. Master control is played by a script.
-- Navigation failure (blocked path, aborted goal) and broker outages are
+- Navigation failure is tested only for a goal Nav2 refuses at once (a node
+  off the map). A path that becomes blocked part-way, and broker outages, are
   implemented but not exercised against real components.
 - No automated validation against the official JSON schemas; field names were
   checked by reading the published v2.0 schemas.
