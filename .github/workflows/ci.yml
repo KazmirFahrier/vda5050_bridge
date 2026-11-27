@@ -62,3 +62,37 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
+
+  nav2-simulation:
+    name: Real Nav2 with simulated robot
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/vda5050_bridge
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y libmosquitto-dev mosquitto mosquitto-clients \
+            ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-nav2-loopback-sim
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build
+      - name: Show available Nav2 launch files
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          ls "$(ros2 pkg prefix nav2_bringup)/share/nav2_bringup/launch"
+      - name: Drive orders through Nav2
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
+
