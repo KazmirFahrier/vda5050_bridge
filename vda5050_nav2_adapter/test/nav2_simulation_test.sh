@@ -2,16 +2,20 @@
 # Copyright 2026 vda5050_bridge contributors
 # SPDX-License-Identifier: Apache-2.0
 #
-# System test against the real Nav2 stack.
+# System test against the real Nav2 stack. Runs in two modes.
 #
-# Real: the adapter, a Mosquitto broker, and Nav2 itself (map server, planner,
-#       controller, behaviour-tree navigator, costmaps) from nav2_bringup.
-# Simulated: the robot. Nav2's "loopback simulator" turns the velocity commands
-#       Nav2 produces straight into motion (tf), with no physics or sensors.
-#       So this proves the adapter drives Nav2 correctly; it says nothing about
-#       localisation, obstacle avoidance or wheel slip.
+# Default (loopback):
+#   Real: the adapter, a Mosquitto broker, and Nav2 itself (map server,
+#         planner, controller, behaviour-tree navigator, costmaps).
+#   Simulated: the robot. Nav2's "loopback simulator" turns velocity commands
+#         straight into motion (tf), with no physics or sensors.
 #
-# Scenario, on the TurtleBot3 world map, along the free strip at x = -2:
+# SIMULATOR=gazebo:
+#   Adds the Gazebo physics simulator with a TurtleBot3: a simulated lidar,
+#   wheel odometry, and AMCL localising the robot on the map from the scans.
+#   The pillars and walls of the world are real obstacles the lidar sees.
+#
+# Scenario, on the TurtleBot3 world map:
 #   1. order o1: A -> B -> C (two legs)                       must complete
 #   2. order o2: C -> A, paused and resumed while driving     must complete
 #   3. order ofail: A -> X, where X is off the map            Nav2 must fail;
@@ -19,6 +23,8 @@
 #      cancelOrder, then order orecover from where the robot
 #        now stands back to A                                 must complete
 #   4. order o3: A -> C, cancelled while driving              must stop cleanly
+#   5. order o4: from the current position to D, which lies
+#        beyond a row of pillars                              must complete
 
 set -uo pipefail
 
@@ -26,11 +32,29 @@ PREFIX="uagv/v2/acme/amr-001"
 PKG_PREFIX="$(ros2 pkg prefix vda5050_nav2_adapter)"
 PARAMS="${PKG_PREFIX}/share/vda5050_nav2_adapter/config/adapter.yaml"
 ADAPTER_BIN="${PKG_PREFIX}/lib/vda5050_nav2_adapter/vda5050_adapter"
-# The loopback launch file is named differently across Nav2 releases; find it.
+SIMULATOR="${SIMULATOR:-loopback}"
 NAV2_LAUNCH_DIR="$(ros2 pkg prefix nav2_bringup)/share/nav2_bringup/launch"
-NAV2_LAUNCH="${NAV2_LAUNCH:-$(basename "$(ls "$NAV2_LAUNCH_DIR"/tb3_loopback* 2>/dev/null | head -n 1)")}"
-if [ -z "$NAV2_LAUNCH" ]; then
-  echo "FAIL: no tb3_loopback launch file in $NAV2_LAUNCH_DIR"; ls "$NAV2_LAUNCH_DIR"; exit 1
+if [ "$SIMULATOR" = "gazebo" ]; then
+  NAV2_LAUNCH="tb3_simulation_launch.py"
+  NAV2_ARGS="headless:=True use_rviz:=False"
+  # Gazebo renders the lidar with OpenGL. Without a GPU that needs a virtual
+  # display and software rendering.
+  LAUNCH_WRAPPER="xvfb-run -a"
+  export LIBGL_ALWAYS_SOFTWARE=1
+  SCALE=4              # physics on a CI machine runs slower than real time
+  NAV2_START_TIMEOUT=420
+  TOLERANCE=0.5        # Nav2 goal tolerance (0.25 m) plus localisation error
+else
+  # The loopback launch file is named differently across Nav2 releases; find it.
+  NAV2_LAUNCH="$(basename "$(ls "$NAV2_LAUNCH_DIR"/tb3_loopback* 2>/dev/null | head -n 1)")"
+  NAV2_ARGS="use_rviz:=False"
+  LAUNCH_WRAPPER=""
+  SCALE=1
+  NAV2_START_TIMEOUT=180
+  TOLERANCE=0.4
+fi
+if [ -z "$NAV2_LAUNCH" ] || [ ! -f "$NAV2_LAUNCH_DIR/$NAV2_LAUNCH" ]; then
+  echo "FAIL: launch file not found in $NAV2_LAUNCH_DIR"; ls "$NAV2_LAUNCH_DIR"; exit 1
 fi
 LOG="$(mktemp)"
 NAV2_LOG="$(mktemp)"
@@ -40,6 +64,7 @@ HEADER='"headerId":1,"timestamp":"2026-01-01T00:00:00.000Z","version":"2.0.0","m
 AX=-2.0; AY=-0.5
 BX=-2.0; BY=0.0
 CX=-2.0; CY=0.5
+DX=0.55; DY=-0.55   # centre of four pillars; reaching it means passing between two
 
 PIDS=()
 cleanup() {
@@ -50,6 +75,9 @@ cleanup() {
   # Stragglers. The patterns must not match this script's own name.
   pkill -f component_container 2>/dev/null
   pkill -f loopback_simulator 2>/dev/null
+  pkill -f "gz sim" 2>/dev/null
+  pkill -f parameter_bridge 2>/dev/null
+  pkill -f Xvfb 2>/dev/null
   return 0
 }
 trap cleanup EXIT
@@ -59,12 +87,12 @@ fail() {
   echo "---- last messages on ${PREFIX}/state ----"
   grep "^${PREFIX}/state " "$LOG" | tail -n 4 | cut -c1-900
   echo "---- last Nav2 log lines ----"
-  tail -n 60 "$NAV2_LOG" | cut -c1-300
+  tail -n 120 "$NAV2_LOG" | cut -c1-300
   exit 1
 }
 
 wait_for() {  # wait_for <description> <timeout s> <extended regex>
-  local description="$1" timeout="$2" pattern="$3"
+  local description="$1" timeout="$(($2 * SCALE))" pattern="$3"
   for _ in $(seq 1 $((timeout * 5))); do
     if grep -Eq "$pattern" "$LOG"; then
       echo "ok: $description"
@@ -103,37 +131,87 @@ sys.exit(0 if distance <= $4 else 1)
   fi
 }
 
+current_position() {  # prints "x y" from the newest visualization message
+  grep "^${PREFIX}/visualization " "$LOG" | tail -n 1 | python3 -c "
+import json, sys
+position = json.loads(sys.stdin.readline().split(' ', 1)[1])['agvPosition']
+print(f\"{position['x']:.3f} {position['y']:.3f}\")"
+}
+
 echo "== starting broker and recorder =="
 mosquitto -p 1883 >/dev/null 2>&1 & PIDS+=($!)
 sleep 1
 mosquitto_sub -v -t "${PREFIX}/#" >"$LOG" & PIDS+=($!)
 
-echo "== starting Nav2 with the loopback simulator (${NAV2_LAUNCH}) =="
-ros2 launch nav2_bringup "$NAV2_LAUNCH" use_rviz:=False >"$NAV2_LOG" 2>&1 &
+set_initial_pose() {
+  # Loopback: places the robot. Gazebo: tells AMCL where the robot (which is
+  # spawned at A) is, so localisation can start.
+  ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+    "{header: {frame_id: map}, pose: {pose: {position: {x: ${AX}, y: ${AY}}, orientation: {w: 1.0}}}}" >/dev/null 2>&1
+}
+
+echo "== starting Nav2, simulator: ${SIMULATOR} (${NAV2_LAUNCH}) =="
+# shellcheck disable=SC2086
+$LAUNCH_WRAPPER ros2 launch nav2_bringup "$NAV2_LAUNCH" $NAV2_ARGS >"$NAV2_LOG" 2>&1 &
 LAUNCH_PID=$!
 
 echo "waiting for Nav2 to become active..."
 ACTIVE=0
-for _ in $(seq 1 90); do
-  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "active"; then
+for i in $(seq 1 $((NAV2_START_TIMEOUT / 2))); do
+  # Anchored on purpose: a plain "active" would also match "inactive".
+  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; then
     ACTIVE=1
     break
   fi
+  # With AMCL, Nav2 cannot finish activating until it knows where the robot is.
+  if [ $((i % 5)) = 0 ]; then
+    set_initial_pose
+  fi
   sleep 2
 done
-[ "$ACTIVE" = 1 ] || fail "Nav2 did not become active within 180 s"
+[ "$ACTIVE" = 1 ] || fail "Nav2 did not become active within ${NAV2_START_TIMEOUT} s"
 echo "ok: Nav2 is active"
+
+if [ "$SIMULATOR" = "gazebo" ]; then
+  echo "== checking that the simulated sensors and localisation are really running =="
+  pgrep -f "gz sim" >/dev/null || fail "Gazebo (gz sim) is not running"
+  echo "ok: Gazebo process is running"
+
+  ros2 node list 2>/dev/null | grep -q "^/amcl$" || fail "AMCL node is not running"
+  echo "ok: AMCL node is running"
+
+  # One lidar scan: it must contain real range readings, i.e. the simulated
+  # lidar is being rendered and actually sees the walls and pillars.
+  timeout 60 ros2 topic echo /scan --once --field ranges 2>/dev/null | python3 -c "
+import math, re, sys
+values = [float(v) for v in re.findall(r'-?[0-9]+\.[0-9]+(?:e-?[0-9]+)?|inf|nan', sys.stdin.read())]
+hits = [v for v in values if math.isfinite(v) and v > 0.0]
+print(f'   lidar scan: {len(values)} beams, {len(hits)} with a finite range'
+      + (f', nearest obstacle {min(hits):.2f} m' if hits else ''))
+sys.exit(0 if len(hits) >= 20 else 1)" || fail "no usable lidar scan on /scan"
+  echo "ok: lidar is publishing real ranges"
+
+  # Simulation time must be advancing.
+  sim_seconds() {  # ros2 topic echo can print notices too; keep only the number
+    timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | grep -E '^[0-9]+$' | head -n 1
+  }
+  T1="$(sim_seconds)"
+  sleep 3
+  T2="$(sim_seconds)"
+  echo "   simulation clock: ${T1} s -> ${T2} s"
+  [ -n "$T1" ] && [ -n "$T2" ] && [ "$T2" -gt "$T1" ] || fail "simulation time is not advancing"
+  echo "ok: simulation time is advancing"
+fi
 
 echo "== starting adapter =="
 "$ADAPTER_BIN" --ros-args --params-file "$PARAMS" & ADAPTER_PID=$!
 PIDS+=("$ADAPTER_PID")
 wait_for "vehicle announces ONLINE" 20 "^${PREFIX}/connection .*\"connectionState\":\"ONLINE\""
 
-echo "== placing the simulated robot at A (${AX}, ${AY}) =="
+echo "== initial pose: A (${AX}, ${AY}) =="
 PLACED=0
 for _ in 1 2 3 4 5; do
-  ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
-    "{header: {frame_id: map}, pose: {pose: {position: {x: ${AX}, y: ${AY}}, orientation: {w: 1.0}}}}" >/dev/null 2>&1
+  set_initial_pose
   sleep 3
   if grep -Eq "^${PREFIX}/visualization .*\"positionInitialized\":true" "$LOG"; then
     PLACED=1
@@ -142,7 +220,7 @@ for _ in 1 2 3 4 5; do
 done
 [ "$PLACED" = 1 ] || fail "no map -> base_link transform after publishing the initial pose"
 sleep 1.5
-expect_position "adapter reports the robot at A" "$AX" "$AY" 0.3
+expect_position "adapter reports the robot at A" "$AX" "$AY" "$TOLERANCE"
 
 echo "== 1. order o1: A -> B -> C =="
 send order "{${HEADER},\"orderId\":\"o1\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node B 2 $BX $BY),$(node C 4 $CX $CY)],\"edges\":[$(edge AB 1 A B),$(edge BC 3 B C)]}"
@@ -153,7 +231,7 @@ wait_for "first leg done: reached B, C still ahead" 60 \
 wait_for "order completed at C with no errors" 60 \
   "^${PREFIX}/state .*\"driving\":false.*\"errors\":\\[\\].*\"lastNodeId\":\"C\".*\"nodeStates\":\\[\\].*\"orderId\":\"o1\""
 sleep 1.5
-expect_position "robot really is at C" "$CX" "$CY" 0.4
+expect_position "robot really is at C" "$CX" "$CY" "$TOLERANCE"
 
 echo "== 2. order o2: C -> A with pause and resume =="
 send order "{${HEADER},\"orderId\":\"o2\",\"orderUpdateId\":0,\"nodes\":[$(node C 0 $CX $CY),$(node A 2 $AX $AY)],\"edges\":[$(edge CA 1 C A)]}"
@@ -170,7 +248,7 @@ instant p2 stopPause
 wait_for "order completed at A after resume, no errors" 90 \
   "^${PREFIX}/state .*\"driving\":false.*\"errors\":\\[\\].*\"lastNodeId\":\"A\".*\"nodeStates\":\\[\\].*\"orderId\":\"o2\".*\"paused\":false"
 sleep 1.5
-expect_position "robot really is at A" "$AX" "$AY" 0.4
+expect_position "robot really is at A" "$AX" "$AY" "$TOLERANCE"
 
 echo "== 3. order ofail: A -> X, a node Nav2 cannot reach =="
 # X lies far outside the map, so Nav2 can never produce a path and gives up.
@@ -193,16 +271,13 @@ wait_for "cancel clears the failed order" 15 \
 
 # Nav2's recovery behaviours (spin, back up) may have moved the robot, so the
 # next order starts from wherever it reports being now.
-read -r HX HY < <(grep "^${PREFIX}/visualization " "$LOG" | tail -n 1 | python3 -c "
-import json, sys
-position = json.loads(sys.stdin.readline().split(' ', 1)[1])['agvPosition']
-print(f\"{position['x']:.3f} {position['y']:.3f}\")")
+read -r HX HY < <(current_position)
 echo "   robot is now at (${HX}, ${HY})"
 send order "{${HEADER},\"orderId\":\"orecover\",\"orderUpdateId\":0,\"nodes\":[$(node H 0 $HX $HY),$(node A 2 $AX $AY)],\"edges\":[$(edge HA 1 H A)]}"
 wait_for "vehicle recovers: new order completes at A, error list cleared" 90 \
   "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"A\".*\"nodeStates\":\[\].*\"orderId\":\"orecover\""
 sleep 1.5
-expect_position "robot really is at A" "$AX" "$AY" 0.4
+expect_position "robot really is at A" "$AX" "$AY" "$TOLERANCE"
 
 echo "== 4. order o3: A -> C, cancelled while driving =="
 send order "{${HEADER},\"orderId\":\"o3\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node C 2 $CX $CY)],\"edges\":[$(edge AC 1 A C)]}"
@@ -216,9 +291,32 @@ if grep -Eq "^${PREFIX}/state .*\"lastNodeId\":\"C\".*\"orderId\":\"o3\"" "$LOG"
 fi
 echo "ok: vehicle did not reach C"
 
+echo "== 5. order o4: to D (${DX}, ${DY}), beyond a row of pillars =="
+sleep 2
+read -r HX HY < <(current_position)
+echo "   starting from (${HX}, ${HY})"
+send order "{${HEADER},\"orderId\":\"o4\",\"orderUpdateId\":0,\"nodes\":[$(node H 0 $HX $HY),$(node D 2 $DX $DY)],\"edges\":[$(edge HD 1 H D)]}"
+wait_for "vehicle driving" 15 "^${PREFIX}/state .*\"driving\":true.*\"orderId\":\"o4\""
+wait_for "order completed at D with no errors" 120 \
+  "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"D\".*\"nodeStates\":\[\].*\"orderId\":\"o4\""
+sleep 1.5
+expect_position "robot really is at D, between the pillars" "$DX" "$DY" "$TOLERANCE"
+
+if [ "$SIMULATOR" = "gazebo" ]; then
+  # AMCL's own estimate, to show the reported position came from localisation.
+  timeout 20 ros2 topic echo /amcl_pose --once --qos-durability transient_local \
+    --qos-reliability reliable --field pose.pose.position 2>/dev/null | tr '\n' ' ' | \
+    sed 's/^/   AMCL pose estimate: /; s/ ---.*//'
+  echo
+fi
+
+echo "== Nav2 log summary =="
+echo "   errors: $(grep -c "\[ERROR\]" "$NAV2_LOG")   warnings: $(grep -c "\[WARN\]" "$NAV2_LOG")"
+grep "\[ERROR\]" "$NAV2_LOG" | sed 's/^\[[^]]*\] //' | cut -c1-200 | sort | uniq -c | sort -rn | head -n 12
+
 echo "== clean shutdown =="
 kill -INT "$ADAPTER_PID"
 wait_for "vehicle announces OFFLINE" 10 "^${PREFIX}/connection .*\"connectionState\":\"OFFLINE\""
 
-echo "PASS: Nav2 simulation test"
+echo "PASS: Nav2 simulation test (${SIMULATOR})"
 exit 0

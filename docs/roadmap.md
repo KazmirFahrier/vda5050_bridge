@@ -5,19 +5,24 @@
 | Area | State |
 |---|---|
 | `vda5050_core` | Implemented; 96 unit tests pass in CI |
-| `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test pass in CI |
-| CI | Green: two standalone jobs, colcon build and test, integration test, Nav2 system test |
+| `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
+| CI | Green: two standalone jobs, colcon build and test, integration test, Nav2 system test in two simulators |
 
 ## Next steps, in order
 
-### 1. Bring-up with a physics simulator
-- Nav2 TurtleBot bring-up with Gazebo, so localisation and sensors are in the loop
-- Check stopping accuracy against `allowedDeviationXY`; tune the Nav2 goal tolerance
-- Longer multi-node orders with order updates extending the base
+### 1. Diagnose the slow first leg
+- The first leg after start-up takes about 46 s with four "Failed to make
+  progress" errors from Nav2's controller (see `testing.md`)
+- Check the goal orientation sent for a first leg without `theta`, then Nav2's
+  progress-checker and goal-checker parameters
+- Ship a recommended Nav2 parameter file, with a goal tolerance tighter than
+  the default 0.25 m
 
-### 2. Failure-path tests for the adapter
-- A path that becomes blocked while driving (needs obstacles in simulation)
+### 2. Harder scenarios
+- An obstacle spawned in the path while driving: expect Nav2 recoveries, then
+  either success or `navigationError`
 - Broker restart during an order
+- Longer multi-node orders with order updates extending the base
 
 ### 3. Verification infrastructure
 - `ament_lint_auto` (cpplint, uncrustify, xmllint)

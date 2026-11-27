@@ -96,3 +96,34 @@ jobs:
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
 
+  gazebo-simulation:
+    name: Real Nav2 with Gazebo (lidar, AMCL, obstacles)
+    runs-on: ubuntu-24.04
+    container: ros:jazzy
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/vda5050_bridge
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y libmosquitto-dev mosquitto mosquitto-clients \
+            ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-nav2-minimal-tb3-sim \
+            xvfb mesa-utils libgl1-mesa-dri libegl1
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build
+      - name: Drive orders through Nav2 in Gazebo
+        shell: bash
+        env:
+          SIMULATOR: gazebo
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
+
