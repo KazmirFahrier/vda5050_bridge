@@ -7,6 +7,7 @@
 | `vda5050_core` unit tests | 109 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
 | Conformance to the official JSON schemas | All published messages and all example inputs conform to versions 2.0.0 and 2.1.0, with one documented deviation | GitHub Actions; schemas cloned from the official repository at fixed tags |
 | ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for both packages | `colcon test` |
+| Fuzzing of the JSON parser and decoders | 60 s per CI run (about 235,000 inputs), no findings | GitHub Actions, libFuzzer with ASan and UBSan |
 | `vda5050_nav2_adapter` integration test | Passes | ROS 2 Jazzy container, real Mosquitto broker, fake Nav2 |
 | `vda5050_nav2_adapter` system test | Passes in both modes | Real broker and real Nav2: once with the loopback simulator, once in Gazebo with lidar and AMCL |
 
@@ -148,6 +149,20 @@ and was not. Fixed, with a test. It also confirmed QoS 0 for all topics but
 `connection` (QoS 1), the 30-second state interval, and the wording of the
 `noOrderToCancel` rule.
 
+## Fuzzing
+
+`vda5050_core/fuzz/fuzz_decoder.cpp` is a libFuzzer target that feeds arbitrary
+bytes to everything that parses network input: `Json::parse`, `decode_order`
+and `decode_instant_actions`. Orders that decode and validate are handed to the
+state machine, and the resulting state is encoded. It checks that nothing
+crashes, leaks, reads out of bounds or triggers undefined behaviour, that only
+the documented exceptions escape, and that JSON survives a write-and-parse
+round trip.
+
+CI runs it for 60 seconds per build under AddressSanitizer and UBSan, starting
+from the example messages: about 235,000 inputs, no findings. Sixty seconds is
+a smoke test, not a fuzzing campaign.
+
 ## Linters
 
 Both packages run `ament_lint_auto` in `colcon test`: cpplint, uncrustify,
@@ -209,6 +224,7 @@ Connection events:
 | Broker outage | Kills the broker while a leg is being driven, waits for the leg to finish offline, starts a new broker | The vehicle reconnects by itself, announces `ONLINE`, and its state reports the leg finished at N2 with no errors. The broker's log shows one connect and no `CONNECTIONBROKEN` afterwards |
 | Clean stop | SIGINT to the node | `OFFLINE` is published; the last will is not |
 | Crash | Starts the node again, then SIGKILL | The broker publishes the last will, `CONNECTIONBROKEN` |
+| Lifecycle | Starts the node with `autostart:=false` and drives it with `ros2 lifecycle set`, as a lifecycle manager would | `configure` alone does not connect; `activate` gives `ONLINE`; `deactivate` gives `OFFLINE`; a second activate/deactivate cycle works; after `cleanup`, `configure` and `activate` work again; SIGINT while active gives `OFFLINE` |
 
 One thing this turned up about the broker, not the adapter: when the Mosquitto
 broker itself is terminated, it publishes connected clients' wills to
@@ -275,7 +291,7 @@ Nav2 log.
 | The readiness check was wrong | It looked for the word `active` in the lifecycle state, which also matches `inactive`. The test moved on before Nav2 was up and still passed, because later steps happened to wait long enough. Found only because a Gazebo start-up of four seconds was not believable. Now anchored |
 | Cleanup killed the test itself | `pkill -f nav2` matched the script's own name: every check passed and the CI step went red |
 | Stopping distance | The robot stops 0.17 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
-| A blocked strip makes Nav2 give up, and the adapter reports it | With the box placed before the order, Nav2 tried for about three minutes (14 controller stalls), then aborted. The vehicle reported a `FATAL` `navigationError` and halted; `cancelOrder` cleared it; the following order completed. This is the failure-after-driving path, exercised against real Nav2 for the first time. Seen in two runs out of two |
+| An unmapped box in the path: both outcomes seen, both handled | Over four CI runs with the box placed before the order: twice Nav2 tried for about three minutes (14 controller stalls) and aborted, and the vehicle reported a `FATAL` `navigationError` and halted, `cancelOrder` cleared it, and the next order completed; twice Nav2 got round the box (once in 13 s with no stalls, once in 112 s with 8) and the order completed. Closest approach to the box centre was 0.33 to 0.35 m, i.e. no contact. The first outcome is the failure-after-driving path, exercised against real Nav2 for the first time. Which outcome occurs is down to Nav2, not the adapter |
 | A box dropped close ahead of a moving robot was brushed | In an earlier variant of the scenario the box was spawned 0.5 m in front of the robot while it was driving. Nav2 got round it after 164 s and 11 stalls, but the closest reported distance to the box centre was 0.26 m, which for this robot means contact or very nearly. Stopping for a suddenly appearing obstacle is the job of Nav2's collision monitor and of a real robot's safety scanner, not of this adapter; with default parameters it was not enough. Seen once |
 | Slow first leg (fixed) | The first 0.5 m leg took about 45 s, with Nav2's controller logging "Failed to make progress" four times. Cause, found by logging the goal the adapter sent and tracing the robot's pose: for a first leg without `theta` the adapter asked for heading 0. The robot, facing east, was told to reach a node 0.5 m to its north and end up facing east again; the controller stalled until a spin recovery turned it. The heading is now the direction of travel from the robot's current position. The leg takes 4 s in both simulators, and the test fails if it is slow or if Nav2 logs any progress failure |
 | Nav2 stalling in a tight gap (observed once, not an adapter fault) | In one Gazebo run the robot approached the gap between two pillars at an angle, from wherever a cancelled order had left it. Nav2's controller failed its progress check 8 times and ran spin, wait and back-up recoveries before getting through; the leg took 100 s where it normally takes 8. The adapter kept the order in progress and reported completion with no errors, which is the correct behaviour. The scenario now starts from a fixed node, so the approach is the same every run. The gap leaves under 0.2 m clearance each side with Nav2's default parameters |
@@ -315,12 +331,10 @@ Read this before claiming more than is true.
 - **A real fleet manager.** Master control is a shell script. Interoperability
   rests on schema conformance, not on a session with a real product.
 - **Unit tests and coverage for the adapter.** It is exercised only end to end.
-- **Lifecycle transitions driven from outside** (a lifecycle manager calling
-  configure, activate, deactivate, cleanup). The node activates itself in every test.
 - **Repeatability of the Gazebo job.** A small number of CI runs. Physics on
-  shared CI machines can be flaky; the obstacle scenario takes about three
+  shared CI machines can be flaky; the obstacle scenario can take three
   minutes and its outcome depends on Nav2.
-- **Fuzzing** of the JSON parser and decoder.
+- **A long fuzzing campaign.** CI fuzzes for 60 seconds per run.
 - **Systematic mutation testing.** Four hand-injected bugs were caught; that is
   a spot check.
 
@@ -329,6 +343,5 @@ Read this before claiming more than is true.
 | Layer | Tooling |
 |---|---|
 | Unit tests for the adapter classes against a mocked action server | GoogleTest with `rclcpp_action` test servers |
-| Lifecycle transitions driven externally | `launch_testing` |
-| Fuzzing the decoder | libFuzzer |
+| Hours-long fuzzing with a saved corpus | libFuzzer, scheduled job |
 | A session with a real fleet manager | Open-RMF or a vendor test instance |

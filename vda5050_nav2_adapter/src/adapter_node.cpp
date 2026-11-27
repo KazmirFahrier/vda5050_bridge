@@ -226,6 +226,9 @@ void AdapterNode::go_offline()
     // CONNECTIONBROKEN last will.
     session_->shutdown();
     transport_->disconnect();
+    // Drop whatever the MQTT thread queued on the way out (typically the
+    // "disconnected" event), so a later activation starts with a clean slate.
+    transport_->take_events();
   }
 }
 

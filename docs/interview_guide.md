@@ -23,7 +23,7 @@ The whole thing builds in CI on ROS 2 Jazzy. One test runs the node against a
 real MQTT broker; another drives orders through the real Nav2 stack, including
 in Gazebo with a simulated lidar and AMCL: multi-leg orders, pause, resume,
 cancel, a navigation failure with recovery, an unmapped obstacle, and a broker
-outage.
+outage. The parsers are fuzzed and the code passes the ROS 2 linters.
 
 ## 2-minute version: add these three points
 

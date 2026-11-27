@@ -6,7 +6,7 @@
 |---|---|
 | `vda5050_core` | Implemented; 109 unit tests, 98.8 % line coverage, schema-conformant |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
-| CI | Seven jobs: two standalone builds, colcon build with tests and linters, integration test, schema conformance, coverage, Nav2 in two simulators |
+| CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
 
 ## Next steps, in order
 
@@ -16,8 +16,9 @@
   `allowedDeviationXY`
 - Tune the controller and collision monitor for narrow passages and for
   obstacles that appear close ahead: with the defaults Nav2 stalled in the
-  pillar gap once, gave up on a blocked strip, and in one run brushed a box
-  that was dropped half a metre in front of the moving robot
+  pillar gap once, gave up on a partly blocked strip in two runs out of four,
+  and in one run brushed a box that was dropped half a metre in front of the
+  moving robot
 
 ### 2. A real counterpart
 - Run against a real fleet manager (for example Open-RMF's VDA 5050 support or

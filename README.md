@@ -14,8 +14,8 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 
 | Package | What it is | Verification |
 |---|---|---|
-| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 109 unit tests and one end-to-end example, 98.8 % line coverage. Runs in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon on ROS 2 Jazzy. Its messages are validated against the official VDA 5050 JSON schemas, versions 2.0.0 and 2.1.0 |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Tested in CI against a real Mosquitto broker (including a broker outage and a crash) and against the **real Nav2 stack**, both with Nav2's loopback simulator and in **Gazebo** with a simulated lidar and AMCL |
+| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 109 unit tests and one end-to-end example, 98.8 % line coverage. Runs in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon on ROS 2 Jazzy. Its messages are validated against the official VDA 5050 JSON schemas, versions 2.0.0 and 2.1.0, and its parsers are fuzzed for 60 s per build |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Tested in CI against a real Mosquitto broker (including a broker outage, a crash, and lifecycle transitions driven from outside) and against the **real Nav2 stack**, both with Nav2's loopback simulator and in **Gazebo** with a simulated lidar and AMCL |
 
 Both packages pass the ROS 2 linters (cpplint, uncrustify, xmllint, lint_cmake,
 flake8, pep257) as part of `colcon test`.
@@ -47,7 +47,7 @@ Details: [docs/testing.md](docs/testing.md).
 vda5050_bridge/
 ├── README.md
 ├── LICENSE                         Apache-2.0
-├── .github/workflows/ci.yml        CI: 7 jobs (builds, tests, linters, schemas, coverage, Nav2, Gazebo)
+├── .github/workflows/ci.yml        CI: 8 jobs (builds, tests, linters, schemas, coverage, fuzzing, Nav2, Gazebo)
 ├── docs/
 │   ├── vda5050_primer.md           The protocol, explained from scratch
 │   ├── architecture.md             How the code is structured and why
@@ -68,6 +68,7 @@ vda5050_bridge/
 │   ├── src/
 │   ├── test/                       Unit tests, schema-conformance scripts, example messages
 │   ├── tools/emit_samples.cpp      Writes example messages for schema validation
+│   ├── fuzz/fuzz_decoder.cpp       libFuzzer target for the parsers
 │   └── examples/simulated_vehicle.cpp   Runnable demo: no ROS, no broker
 └── vda5050_nav2_adapter/           ament_cmake package
     ├── README.md                   Interfaces, parameters, how to run
