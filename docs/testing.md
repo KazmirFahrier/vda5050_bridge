@@ -156,7 +156,7 @@ the script's cleanup killed every process with "nav2" in its command line,
 which included the script itself. A green log with a red job is worth reading
 to the end.
 
-Observed stopping distance from the target node was 0.23 to 0.24 m, which is
+Observed stopping distance from the target node was 0.22 to 0.24 m, which is
 Nav2's default goal tolerance.
 
 ## What the first real build found

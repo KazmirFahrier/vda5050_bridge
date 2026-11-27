@@ -116,7 +116,7 @@ real ones; only the robot is simulated) on the TurtleBot3 world map, then:
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
 
-In the recorded run the robot stopped 0.23 to 0.24 m from each target node.
+In the recorded CI runs the robot stopped 0.22 to 0.24 m from each target node.
 That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
 deployment needs to set it tighter than the fleet manager's `allowedDeviationXY`.
 
