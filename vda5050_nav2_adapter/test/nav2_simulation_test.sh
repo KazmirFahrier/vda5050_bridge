@@ -192,9 +192,12 @@ sys.exit(0 if len(hits) >= 20 else 1)" || fail "no usable lidar scan on /scan"
   echo "ok: lidar is publishing real ranges"
 
   # Simulation time must be advancing.
-  T1="$(timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | head -n 1)"
+  sim_seconds() {  # ros2 topic echo can print notices too; keep only the number
+    timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | grep -E '^[0-9]+$' | head -n 1
+  }
+  T1="$(sim_seconds)"
   sleep 3
-  T2="$(timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | head -n 1)"
+  T2="$(sim_seconds)"
   echo "   simulation clock: ${T1} s -> ${T2} s"
   [ -n "$T1" ] && [ -n "$T2" ] && [ "$T2" -gt "$T1" ] || fail "simulation time is not advancing"
   echo "ok: simulation time is advancing"
