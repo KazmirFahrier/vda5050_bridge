@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -100,6 +101,12 @@ AdapterNode::CallbackReturn AdapterNode::on_configure(const rclcpp_lifecycle::St
       } else {
         session_->orders().on_navigation_failed(reason);
       }
+    },
+    [this]() -> std::optional<std::pair<double, double>> {
+      if (!position_.position_initialized) {
+        return std::nullopt;
+      }
+      return std::make_pair(position_.x, position_.y);
     });
 
   actions_ = std::make_unique<TopicActionHandler>(

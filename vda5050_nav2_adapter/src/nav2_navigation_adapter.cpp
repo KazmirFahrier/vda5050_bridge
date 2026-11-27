@@ -11,8 +11,10 @@ namespace vda5050_nav2_adapter
 
 Nav2NavigationAdapter::Nav2NavigationAdapter(
   rclcpp_lifecycle::LifecycleNode & node, const std::string & action_name,
-  const std::string & global_frame, ResultCallback on_result)
-: node_(node), global_frame_(global_frame), on_result_(std::move(on_result))
+  const std::string & global_frame, ResultCallback on_result,
+  PositionProvider current_position)
+: node_(node), global_frame_(global_frame), on_result_(std::move(on_result)),
+  current_position_(std::move(current_position))
 {
   client_ = rclcpp_action::create_client<NavigateToPose>(
     node_.get_node_base_interface(), node_.get_node_graph_interface(),
@@ -40,14 +42,26 @@ void Nav2NavigationAdapter::send_goal()
 
   const vda5050_core::NodePosition & position = *target_->node_position;
 
-  // Orientation: use theta when the order gives one. Otherwise face along the
-  // direction of travel from the previous node, which is what a vehicle
-  // driving the edge would naturally end up with.
+  // Orientation: use theta when the order gives one. Otherwise ask the robot
+  // to arrive facing the way it travelled, measured from where it is now (or,
+  // if it is not localised, from the previous node).
+  //
+  // The fallback must not be a fixed heading. Asking a robot to reach a node
+  // 0.5 m to its side while ending up facing its original direction makes
+  // Nav2's controller stall: in testing it failed its progress check four
+  // times (40 s) before a spin recovery freed it.
   double yaw = 0.0;
   if (position.theta) {
     yaw = *position.theta;
-  } else if (previous_position_) {
-    yaw = std::atan2(position.y - previous_position_->y, position.x - previous_position_->x);
+  } else {
+    std::optional<std::pair<double, double>> from = current_position_();
+    if (!from && previous_position_) {
+      from = std::make_pair(previous_position_->x, previous_position_->y);
+    }
+    // Closer than a centimetre there is no meaningful direction; keep yaw 0.
+    if (from && std::hypot(position.x - from->first, position.y - from->second) > 0.01) {
+      yaw = std::atan2(position.y - from->second, position.x - from->first);
+    }
   }
 
   NavigateToPose::Goal goal;

@@ -241,6 +241,9 @@ for line in sys.stdin:
     print(f\"   {p['x']:6.2f} {p['y']:6.2f} {p['theta']:6.2f}\")" | head -n 60
 echo "   ---- Nav2 and adapter log during the first leg ----"
 tail -n +"$((LEG1_NAV_START + 1))" "$NAV2_LOG" | grep -E "progress|Goal|goal|recover|Recover|spin|backup|Spin|Back|wait|Wait|Reached|succeeded|failed|Failed|abort" | sed 's/^\[[^]]*\] //' | cut -c1-190 | head -n 50
+# Regression guard: this leg used to take about 45 s (see docs/testing.md).
+[ "$LEG1_SECONDS" -le $((20 * SCALE)) ] || fail "first leg took ${LEG1_SECONDS} s"
+echo "ok: first leg completed promptly"
 wait_for "order completed at C with no errors" 60 \
   "^${PREFIX}/state .*\"driving\":false.*\"errors\":\\[\\].*\"lastNodeId\":\"C\".*\"nodeStates\":\\[\\].*\"orderId\":\"o1\""
 sleep 1.5
@@ -326,6 +329,10 @@ fi
 echo "== Nav2 log summary =="
 echo "   errors: $(grep -c "\[ERROR\]" "$NAV2_LOG")   warnings: $(grep -c "\[WARN\]" "$NAV2_LOG")"
 grep "\[ERROR\]" "$NAV2_LOG" | sed 's/^\[[^]]*\] //' | cut -c1-200 | sort | uniq -c | sort -rn | head -n 12
+
+PROGRESS_FAILURES=$(grep -c "Failed to make progress" "$NAV2_LOG")
+[ "$PROGRESS_FAILURES" = 0 ] || fail "Nav2's controller failed its progress check ${PROGRESS_FAILURES} time(s)"
+echo "ok: Nav2's controller never stalled"
 
 echo "== clean shutdown =="
 kill -INT "$ADAPTER_PID"
