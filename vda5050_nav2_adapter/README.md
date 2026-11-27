@@ -2,11 +2,9 @@
 
 ROS 2 lifecycle node that makes a Nav2 robot a VDA 5050 vehicle.
 
-> **Status: written, never compiled.** This package was authored on a machine
-> without ROS 2. Its sources were syntax-checked only against hand-written
-> stand-in headers, which proves the code is internally consistent but says
-> nothing about whether it matches the real rclcpp, Nav2 or libmosquitto APIs.
-> Treat the first `colcon build` as part of the development work.
+**Status.** Builds on ROS 2 Jazzy without warnings. An integration test in CI
+runs the node against a real Mosquitto broker, tf2 and a fake `NavigateToPose`
+server. It has not been run against real Nav2, a simulator or a robot.
 
 ## What it does
 
@@ -71,33 +69,49 @@ See `config/adapter.yaml`, which lists every parameter with a comment.
 With `autostart: true` (the default) the executable configures and activates
 itself. Set it to `false` when a lifecycle manager controls start-up order.
 
-## First-build checklist
+## Running it
 
-Points most likely to need attention, in the order you will meet them:
+Install the one dependency rosdep cannot resolve, then build as usual:
 
-1. **rosdep key for libmosquitto.** `package.xml` uses `libmosquitto-dev`. If
-   rosdep does not resolve it, install the system package by hand
-   (`sudo apt install libmosquitto-dev`) and adjust the key.
-2. **`vda5050_core` as a dependency.** The adapter links
-   `vda5050_core::vda5050_core`, which relies on the core's
-   `ament_export_targets` call. That path has never been exercised.
-3. **rclcpp API details** written from memory of ROS 2 Jazzy:
-   `rclcpp_action::create_client` with node interfaces, the
-   `SendGoalOptions` callback signatures, `LifecycleNode::on_activate()`
-   activating lifecycle publishers, `declare_parameter` with an empty
-   string-array default.
-4. **Run on a single-threaded executor.** The core is not thread-safe.
-   `main.cpp` does this; do not load the node into a multi-threaded container.
-5. **OFFLINE on shutdown.** `deactivate` publishes `OFFLINE` and disconnects
-   immediately after. Whether the broker receives the message before the
-   DISCONNECT has not been tested; if it does not, wait for the publish
-   acknowledgement before disconnecting.
+```bash
+sudo apt-get install -y libmosquitto-dev
+rosdep install --from-paths src --ignore-src -y
+colcon build --packages-up-to vda5050_nav2_adapter
+ros2 launch vda5050_nav2_adapter adapter.launch.py params_file:=/path/to/your.yaml
+```
+
+Run it on a single-threaded executor, as `main.cpp` does. The protocol core is
+not thread-safe, so do not load the node into a multi-threaded container.
+
+On Ctrl-C the node publishes `OFFLINE`, waits up to one second for the broker
+to receive it, and disconnects. If the process is killed instead, the broker
+publishes the `CONNECTIONBROKEN` last will.
+
+## Integration test
+
+`test/integration_test.sh` starts a Mosquitto broker, a static `map ->
+base_link` transform, `test/fake_nav2_server.py` and the adapter, then plays
+master control with `mosquitto_pub` and checks what the vehicle publishes:
+
+| Step | Checked |
+|---|---|
+| Start-up | `ONLINE` on `connection`, a state message, pose from tf2 in `visualization` |
+| `stateRequest` | Answered with a state |
+| Order N0 -> N1 | Goal reaches the action server; state shows driving, then completed at N1 with no errors |
+| Instant action `pick` | Accepted and started (`INITIALIZING`); a `FINISHED` report sent on `~/action_status` reaches master control. The content of `~/action_request` is not inspected |
+| Malformed order | Reported as `validationError` |
+| `factsheetRequest` | Factsheet published |
+| SIGINT | `OFFLINE` published; last will not triggered |
+
+What the first real build found, for the record: a missing rosdep key for
+libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
+`-Wdangling-reference`), and a retained `ONLINE` left behind on Ctrl-C.
 
 ## Not implemented
 
 - TLS for the MQTT connection
 - `diagnostic_msgs` output
-- Automated tests for this package (`launch_testing` against a fake
-  `NavigateToPose` server and a real broker). All current tests are in
-  `vda5050_core`.
+- Unit tests for the individual adapter classes, and tests of pause, cancel
+  and navigation failure through the action interface. The integration test
+  covers the success path only.
 - `NavigateThroughPoses` for smoother motion across several released nodes

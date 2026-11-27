@@ -4,25 +4,20 @@
 
 | Area | State |
 |---|---|
-| `vda5050_core` | Implemented and unit-tested (96 tests) |
-| `vda5050_nav2_adapter` | Implemented, never compiled or run |
-| CI | Workflow written, never run |
+| `vda5050_core` | Implemented; 96 unit tests pass in CI |
+| `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; one integration test passes in CI |
+| CI | Green: two standalone jobs, colcon build and test, integration test |
 
 ## Next steps, in order
 
-### 1. First real build
-On a machine with ROS 2 Jazzy:
+### 1. Bring-up against real Nav2 in simulation
+- Run with the Nav2 TurtleBot bring-up and a local Mosquitto broker
+- Send multi-node orders; check goal orientation and stopping accuracy
+- Exercise cancel, pause/resume and a blocked path
 
-- `colcon build` both packages; fix what the compiler finds in the adapter
-  (see the checklist in `vda5050_nav2_adapter/README.md`)
-- `colcon test` so the core's tests run under real GoogleTest
-- Push to GitHub and get the CI workflow green
-
-### 2. Bring-up against a simulator
-- Run with Nav2 and a simulated robot (for example the Nav2 TurtleBot bring-up)
-  and a local Mosquitto broker
-- Send orders by hand with `mosquitto_pub`; watch state with `mosquitto_sub`
-- Confirm the OFFLINE-then-disconnect ordering on shutdown
+### 2. Failure-path tests for the adapter
+- Fake action server that rejects goals, aborts, and honours cancel
+- Broker restart during an order
 
 ### 3. Verification infrastructure
 - `ament_lint_auto` (cpplint, uncrustify, xmllint)

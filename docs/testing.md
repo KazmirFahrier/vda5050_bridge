@@ -2,10 +2,10 @@
 
 ## Summary
 
-| Package | Automated tests | Run where |
+| Package | Automated tests | Where they run |
 |---|---|---|
-| `vda5050_core` | 96 unit tests, 1 end-to-end example | Ubuntu 24.04, GCC 13.3 and Clang |
-| `vda5050_nav2_adapter` | none | never compiled |
+| `vda5050_core` | 96 unit tests, 1 end-to-end example | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
+| `vda5050_nav2_adapter` | 1 integration test | GitHub Actions, ROS 2 Jazzy container, real Mosquitto broker, fake Nav2 |
 
 ## How to run
 
@@ -20,7 +20,15 @@ ctest --test-dir build --output-on-failure
 ```
 
 CMake prints `GoogleTest not found - using test/support/mini_gtest` when it
-falls back to the bundled shim.
+falls back to the bundled shim. CI installs GoogleTest, so the shim is only
+used on machines without it.
+
+With ROS 2 (what the `ros2` CI job does):
+
+```bash
+colcon build && colcon test && colcon test-result --verbose
+bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
+```
 
 ## What exists
 
@@ -103,34 +111,63 @@ rather than in the library: a reference was kept into a temporary JSON document
 (`last_state().find("errors")->as_array()`), a use-after-free that passed
 silently without the sanitizer. It was fixed by keeping the document alive.
 
-## Build configurations verified (`vda5050_core`)
+## The adapter integration test
 
-| Configuration | Result |
+`vda5050_nav2_adapter/test/integration_test.sh` runs the real executable.
+
+- **Real:** the adapter node, a Mosquitto broker, tf2, the ROS 2 action protocol.
+- **Fake:** Nav2 (`fake_nav2_server.py` succeeds every goal after 0.5 s) and
+  the robot pose (a static transform at the origin).
+
+It checks: `ONLINE` on connect; a state message; the tf2 pose in
+`visualization`; `stateRequest`; an order N0 -> N1 driven through the action
+server to completion with no errors; a `pick` action started, and a report
+sent on the ROS status topic returned to master control (the request topic's
+content is not inspected); a malformed order reported as
+`validationError`; the factsheet on request; and on SIGINT, `OFFLINE`
+published without the last will firing.
+
+## What the first real build found
+
+The adapter was written without ROS installed. Its first CI runs found three
+problems, none of which the earlier stand-in-header syntax check could have:
+
+| Problem | How it was found | Fix |
+|---|---|---|
+| No rosdep key `libmosquitto-dev` | `rosdep install` failed | Install with apt; documented |
+| Range-for over a member of a destroyed `Parameter` temporary | GCC `-Wdangling-reference` | Copy the array first |
+| Ctrl-C left a retained `ONLINE` on the broker | Reasoning while writing the integration test, then confirmed by it | `main()` calls `AdapterNode::stop()`; `disconnect()` waits for in-flight publishes |
+
+## Configurations verified in CI
+
+| Job | Result |
 |---|---|
-| GCC 13.3, Debug, ASan + UBSan, `-Werror` | 96/96 pass, example passes, no sanitizer reports |
-| GCC 13.3, Release, `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror` | builds clean, 96/96 pass |
-| Clang, `-Wall -Wextra -Werror` | builds clean, 96/96 pass |
+| Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 96/96 pass, example passes |
+| Standalone CMake, Clang, same flags | 96/96 pass, example passes |
+| colcon on `ros:jazzy`, both packages | builds with no warnings; 96/96 pass |
+| Integration test on `ros:jazzy` | passes |
+
+The core was additionally built locally in Release with
+`-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror`.
 
 ## What has NOT been verified
 
 Read this before claiming more than is true.
 
-- **The whole `vda5050_nav2_adapter` package.** It has never been compiled
-  against ROS 2, Nav2 or libmosquitto, and has no tests. Its sources passed a
-  compiler syntax check against small hand-written stand-in headers. That
-  catches typos and inconsistencies inside the package; it cannot catch a
-  wrong assumption about a real API, and it exercises no behaviour.
-- **Real GoogleTest.** All runs used the shim.
-- **colcon / ament build** of either package.
-- **ROS 2 linters** (`ament_cpplint`, `ament_uncrustify`). The code follows the
-  ROS 2 style by hand; the linters are not wired in yet.
-- **The CI workflow** has never run.
+- **Real Nav2.** The action server in the test always succeeds. Rejected goals,
+  aborted goals, cancel and pause/resume through the action interface are
+  implemented but not exercised by any test.
+- **A simulator or physical robot.**
+- **A real fleet manager.** Master control is a shell script.
+- **The launch file** has not been executed; the test starts the binary directly.
+- **Reconnect behaviour** after a broker outage (implemented in the core and
+  tested there with a fake transport; not tested with a real broker).
+- **ROS 2 linters** (`ament_cpplint`, `ament_uncrustify`) are not wired in.
 - **Coverage measurement.** No line or branch coverage number exists.
-- **Interoperability.** Nothing has been exchanged with a real broker or fleet
-  manager. Field names were compared with the published v2.0 JSON schemas by
-  reading them, not by automated schema validation. The `instantActions` schema
-  could not be retrieved, so the array key (`actions`) is from memory; the
-  decoder also accepts the older `instantActions` key.
+- **Schema conformance.** Field names were compared with the published v2.0
+  JSON schemas by reading them, not by automated validation. The
+  `instantActions` schema could not be retrieved, so the array key (`actions`)
+  is from memory; the decoder also accepts the older `instantActions` key.
 - **Fuzzing** of the JSON parser and decoder.
 
 ## Planned test layers
@@ -138,6 +175,7 @@ Read this before claiming more than is true.
 | Layer | Tooling |
 |---|---|
 | Schema conformance: validate encoded messages against the official JSON schemas | Python `jsonschema` in CI |
-| Node integration: lifecycle transitions, Nav2 client against a fake `NavigateToPose` server | `launch_testing` |
-| System: adapter + Mosquitto broker + scripted master control | Docker Compose in CI |
+| Navigation failure paths: a fake action server that rejects, aborts and honours cancel | extend the integration test |
+| Lifecycle transitions driven externally, via the launch file | `launch_testing` |
+| Bring-up with real Nav2 in simulation | Nav2 TurtleBot bring-up |
 | Fuzzing the decoder | libFuzzer |
