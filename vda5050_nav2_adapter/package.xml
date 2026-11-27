@@ -25,7 +25,8 @@
   <depend>std_msgs</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
-  <depend>libmosquitto-dev</depend>
+  <!-- libmosquitto (system package libmosquitto-dev) is also required. There is no
+       rosdep key for it, so install it with apt; see README.md. -->
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

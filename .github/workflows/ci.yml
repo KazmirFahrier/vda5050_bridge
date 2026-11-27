@@ -1,5 +1,3 @@
-# NOTE: this workflow has been written but never executed. Expect to adjust it
-# on the first run. See docs/testing.md ("What has NOT been verified").
 name: CI
 
 on:
@@ -42,6 +40,8 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
+          # libmosquitto has no rosdep key, so it is installed directly.
+          apt-get install -y libmosquitto-dev
           rosdep update
           rosdep install --from-paths src --ignore-src -y
       - name: Build
