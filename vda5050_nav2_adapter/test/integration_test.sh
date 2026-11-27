@@ -68,7 +68,8 @@ wait_for_new() {
   fail "$description (no new message matched: $pattern)"
 }
 
-start_broker() { mosquitto -p 1883 >/dev/null 2>&1 & BROKER_PID=$!; PIDS+=("$BROKER_PID"); sleep 1; }
+BROKER_LOG="$(mktemp)"
+start_broker() { mosquitto -v -p 1883 >>"$BROKER_LOG" 2>&1 & BROKER_PID=$!; PIDS+=("$BROKER_PID"); sleep 1; }
 start_recorder() { mosquitto_sub -v -t "${PREFIX}/#" >>"$LOG" & RECORDER_PID=$!; PIDS+=("$RECORDER_PID"); }
 
 send() {  # send <topic> <payload>
@@ -144,14 +145,25 @@ if grep -Eq "^${PREFIX}/state .*\"lastNodeId\":\"N2\"" "$LOG"; then
   fail "arrival at N2 was reported before the broker went away; the outage tested nothing"
 fi
 mark
+BROKER_MARK=$(wc -l <"$BROKER_LOG")
 start_broker
-start_recorder
+# The recorder (mosquitto_sub) reconnects and resubscribes by itself.
 echo "   broker restarted"
 wait_for_new "vehicle reconnects by itself and announces ONLINE" 60 \
   "^${PREFIX}/connection .*\"connectionState\":\"ONLINE\""
 send instantActions "{${HEADER},\"actions\":[{\"actionType\":\"stateRequest\",\"actionId\":\"s2\",\"blockingType\":\"NONE\"}]}"
 wait_for_new "progress made offline is reported: o2 finished at N2, no errors" 15 \
   "^${PREFIX}/state .*\"actionId\":\"s2\",\"actionStatus\":\"FINISHED\".*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"N2\".*\"nodeStates\":\[\].*\"orderId\":\"o2\""
+
+sleep 3
+echo "   ---- what the restarted broker saw of the vehicle's client ----"
+tail -n +"$((BROKER_MARK + 1))" "$BROKER_LOG" | grep -E "acme-amr-001" | grep -vE "PUBLISH|PINGREQ|PINGRESP|PUBACK|SUBACK" | cut -c1-200 | head -n 30
+echo "   ---- connection topic since the restart ----"
+tail -n +"$((MARK + 1))" "$LOG" | grep "^${PREFIX}/connection " | cut -c1-200
+if tail -n +"$((MARK + 1))" "$LOG" | grep -q "CONNECTIONBROKEN"; then
+  fail "the vehicle's connection broke again after it had reconnected"
+fi
+echo "ok: one clean reconnect, no CONNECTIONBROKEN"
 
 echo "== clean shutdown (SIGINT) =="
 mark
@@ -163,7 +175,7 @@ kill -INT "$NODE_PID"
 wait_for_new "vehicle announces OFFLINE before leaving" 10 \
   "^${PREFIX}/connection .*\"connectionState\":\"OFFLINE\""
 sleep 2
-if grep -q "CONNECTIONBROKEN" "$LOG"; then
+if tail -n +"$((MARK + 1))" "$LOG" | grep -q "CONNECTIONBROKEN"; then
   fail "last will was published on a clean shutdown"
 fi
 echo "ok: last will not triggered"
