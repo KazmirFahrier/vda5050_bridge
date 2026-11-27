@@ -15,17 +15,19 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 | Package | What it is | Verification |
 |---|---|---|
 | `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 96 unit tests and one end-to-end example. Pass in CI with GCC and Clang under AddressSanitizer/UBSan, and under colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. One integration test in CI runs the node against a real Mosquitto broker with a fake `NavigateToPose` server |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Two tests in CI: an integration test (real Mosquitto broker, fake Nav2) and a system test that drives orders through the **real Nav2 stack** with a simulated robot, including pause/resume and cancel |
 
 What has **not** been done:
 
-- No run against real Nav2, a simulator or a physical robot. Navigation is
-  exercised only through a fake action server that always succeeds.
+- No physics simulator or physical robot. In the Nav2 system test the robot is
+  Nav2's loopback simulator: velocity commands become motion directly, with no
+  sensors, localisation error or obstacles.
 - No run against a real fleet manager. Master control is played by a script.
+- Navigation failure (blocked path, aborted goal) and broker outages are
+  implemented but not exercised against real components.
 - No automated validation against the official JSON schemas; field names were
   checked by reading the published v2.0 schemas.
-- The adapter has no unit tests of its own, only the one integration test.
-- The launch file has not been executed (the test starts the executable directly).
+- The launch file has not been executed (tests start the executable directly).
 
 Details: [docs/testing.md](docs/testing.md).
 
@@ -35,7 +37,7 @@ Details: [docs/testing.md](docs/testing.md).
 vda5050_bridge/
 ├── README.md
 ├── LICENSE                         Apache-2.0
-├── .github/workflows/ci.yml        CI: standalone build x2 compilers, colcon build, integration test
+├── .github/workflows/ci.yml        CI: standalone x2 compilers, colcon, integration test, Nav2 system test
 ├── docs/
 │   ├── vda5050_primer.md           The protocol, explained from scratch
 │   ├── architecture.md             How the code is structured and why
@@ -66,7 +68,7 @@ vda5050_bridge/
     ├── src/
     ├── config/adapter.yaml
     ├── launch/adapter.launch.py
-    └── test/                       Integration test: real broker, fake Nav2
+    └── test/                       Integration test (fake Nav2) and system test (real Nav2)
 ```
 
 ## Try it without ROS
@@ -111,10 +113,13 @@ source install/setup.bash
 ros2 launch vda5050_nav2_adapter adapter.launch.py
 ```
 
-To run the integration test locally (needs `mosquitto` and `mosquitto-clients`):
+To run the tests locally (needs `mosquitto` and `mosquitto-clients`; the second
+also needs `ros-jazzy-navigation2`, `ros-jazzy-nav2-bringup` and
+`ros-jazzy-nav2-loopback-sim`):
 
 ```bash
 bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
+bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
 ```
 
 ## Where to start reading
