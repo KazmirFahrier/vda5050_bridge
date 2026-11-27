@@ -133,6 +133,11 @@ In the recorded CI runs the robot stopped 0.17 to 0.24 m from each target node.
 That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
 deployment needs to set it tighter than the fleet manager's `allowedDeviationXY`.
 
+Goal heading: when a node gives no `theta`, the adapter asks Nav2 to arrive
+facing the direction of travel, measured from the robot's current position. An
+earlier version used a fixed heading for the first leg, which made Nav2's
+controller stall for about 40 s; see `docs/testing.md`.
+
 What the first real build found, for the record: a missing rosdep key for
 libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 `-Wdangling-reference`), and a retained `ONLINE` left behind on Ctrl-C.

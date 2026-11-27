@@ -178,7 +178,7 @@ Nav2 log.
 | The readiness check was wrong | It looked for the word `active` in the lifecycle state, which also matches `inactive`. The test moved on before Nav2 was up and still passed, because later steps happened to wait long enough. Found only because a Gazebo start-up of four seconds was not believable. Now anchored |
 | Cleanup killed the test itself | `pkill -f nav2` matched the script's own name: every check passed and the CI step went red |
 | Stopping distance | The robot stops 0.17 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
-| Slow first leg (open) | The first 0.5 m leg after start-up takes about 46 s in both modes; Nav2's controller logs "Failed to make progress" four times. The second 0.5 m leg takes about 4 s and the 2.5 m leg about 6 s. Not yet diagnosed; it may be Nav2 tuning or the goal orientation the adapter sends for the first leg |
+| Slow first leg (fixed) | The first 0.5 m leg took about 45 s, with Nav2's controller logging "Failed to make progress" four times. Cause, found by logging the goal the adapter sent and tracing the robot's pose: for a first leg without `theta` the adapter asked for heading 0. The robot, facing east, was told to reach a node 0.5 m to its north and end up facing east again; the controller stalled until a spin recovery turned it. The heading is now the direction of travel from the robot's current position. The leg takes 4 s in both simulators, and the test fails if it is slow or if Nav2 logs any progress failure |
 
 ## What the first real build found
 

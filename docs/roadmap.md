@@ -10,13 +10,10 @@
 
 ## Next steps, in order
 
-### 1. Diagnose the slow first leg
-- The first leg after start-up takes about 46 s with four "Failed to make
-  progress" errors from Nav2's controller (see `testing.md`)
-- Check the goal orientation sent for a first leg without `theta`, then Nav2's
-  progress-checker and goal-checker parameters
+### 1. Nav2 parameters for deployment
 - Ship a recommended Nav2 parameter file, with a goal tolerance tighter than
-  the default 0.25 m
+  the default 0.25 m so the vehicle stops within the fleet manager's
+  `allowedDeviationXY`
 
 ### 2. Harder scenarios
 - An obstacle spawned in the path while driving: expect Nav2 recoveries, then
@@ -66,7 +63,7 @@ Limitations of the adapter design:
 |---|---|
 | Pause | Implemented by cancelling the Nav2 goal and re-sending it on resume; Nav2 replans from the current pose |
 | Edge properties | `maxSpeed`, `orientation` and other edge fields are not passed to Nav2 |
-| Goal orientation without `theta` | Faces along the direction from the previous node |
+| Goal orientation without `theta` | Faces along the direction of travel, measured from the robot's current position |
 | Offline publishing | Messages published while the broker is unreachable are dropped; a full state is sent on reconnect |
 | Security | Username/password only, sent in clear text without TLS |
 

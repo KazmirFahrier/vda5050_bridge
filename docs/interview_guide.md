@@ -126,6 +126,19 @@ left a retained `ONLINE` on the broker, because the process exited without
 announcing `OFFLINE`. The lesson in each: the bug was found by a tool or a test
 at a boundary, not by reading the code.
 
+**Walk me through debugging something.**
+In simulation the first leg of the first order took 45 seconds and every later
+leg took about 4. Nav2 logged "Failed to make progress" four times. I did not
+guess: I made the adapter log each goal it sent and had the test record the
+robot's pose once a second. The trace showed the robot sitting still for 35
+seconds, and the log showed the goal heading was 0 while the node was straight
+to the robot's side. For a leg with no `theta` and no previous node, my code
+fell back to heading 0, so Nav2 was asked to move sideways and finish facing
+the way it started. It stalled until a spin recovery turned it. The fix was to
+aim the heading along the direction of travel from the robot's actual position.
+The leg now takes 4 seconds, and the test fails if it is slow or if Nav2 logs
+any progress failure, so it cannot come back unnoticed.
+
 **Have you had a test that passed for the wrong reason?**
 Yes. The Nav2 test waited for the navigator to be "active" by searching the
 lifecycle state for that word, which also matches "inactive". It passed for
@@ -190,8 +203,6 @@ State these before you are asked.
   script plays master control.
 - In simulation the obstacles are static. Nothing moves into the path, and
   navigation failure is tested only for a goal Nav2 refuses outright.
-- The first leg after start-up is slow (about 46 s, with Nav2 progress
-  failures) and I have not diagnosed why.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

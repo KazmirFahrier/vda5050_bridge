@@ -223,8 +223,6 @@ sleep 1.5
 expect_position "adapter reports the robot at A" "$AX" "$AY" "$TOLERANCE"
 
 echo "== 1. order o1: A -> B -> C =="
-LEG1_VIS_START=$(wc -l <"$LOG")
-LEG1_NAV_START=$(wc -l <"$NAV2_LOG")
 LEG1_T0=$(date +%s)
 send order "{${HEADER},\"orderId\":\"o1\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node B 2 $BX $BY),$(node C 4 $CX $CY)],\"edges\":[$(edge AB 1 A B),$(edge BC 3 B C)]}"
 wait_for "order accepted, vehicle driving" 15 \
@@ -233,14 +231,6 @@ wait_for "first leg done: reached B, C still ahead" 60 \
   "^${PREFIX}/state .*\"lastNodeId\":\"B\".*\"orderId\":\"o1\""
 LEG1_SECONDS=$(( $(date +%s) - LEG1_T0 ))
 echo "   first leg took ${LEG1_SECONDS} s"
-echo "   ---- robot pose during the first leg (x, y, heading), one line per second ----"
-tail -n +"$((LEG1_VIS_START + 1))" "$LOG" | grep "^${PREFIX}/visualization " | python3 -c "
-import json, sys
-for line in sys.stdin:
-    p = json.loads(line.split(' ', 1)[1])['agvPosition']
-    print(f\"   {p['x']:6.2f} {p['y']:6.2f} {p['theta']:6.2f}\")" | head -n 60
-echo "   ---- Nav2 and adapter log during the first leg ----"
-tail -n +"$((LEG1_NAV_START + 1))" "$NAV2_LOG" | grep -E "progress|Goal|goal|recover|Recover|spin|backup|Spin|Back|wait|Wait|Reached|succeeded|failed|Failed|abort" | sed 's/^\[[^]]*\] //' | cut -c1-190 | head -n 50
 # Regression guard: this leg used to take about 45 s (see docs/testing.md).
 [ "$LEG1_SECONDS" -le $((20 * SCALE)) ] || fail "first leg took ${LEG1_SECONDS} s"
 echo "ok: first leg completed promptly"
