@@ -55,6 +55,30 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
+      - name: Lint report (temporary)
+        shell: bash
+        continue-on-error: true
+        run: |
+          apt-get install -y ros-jazzy-ament-uncrustify ros-jazzy-ament-cpplint ros-jazzy-ament-flake8 ros-jazzy-ament-pep257 ros-jazzy-ament-xmllint ros-jazzy-ament-lint-cmake >/dev/null
+          source /opt/ros/jazzy/setup.bash
+          cd src/vda5050_bridge
+          git config --global --add safe.directory "$PWD"
+          mkdir -p /tmp/lint
+          FILES=$(git ls-files '*.cpp' '*.hpp' | grep -v test/support/shim)
+          ament_uncrustify --reformat $FILES > /tmp/lint/uncrustify.txt 2>&1 || true
+          git diff > /tmp/lint/uncrustify.patch
+          git checkout -- .
+          ament_cpplint $FILES > /tmp/lint/cpplint.txt 2>&1 || true
+          ament_flake8 . > /tmp/lint/flake8.txt 2>&1 || true
+          ament_pep257 . > /tmp/lint/pep257.txt 2>&1 || true
+          ament_xmllint . > /tmp/lint/xmllint.txt 2>&1 || true
+          ament_lint_cmake . > /tmp/lint/lint_cmake.txt 2>&1 || true
+          wc -l /tmp/lint/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-report
+          path: /tmp/lint
       - name: Integration test (real broker, fake Nav2)
         shell: bash
         run: |
@@ -126,4 +150,42 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
+
+  schema-conformance:
+    name: Official VDA 5050 JSON schemas (2.0.0 and 2.1.0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3-jsonschema
+      - name: Fetch the official schemas at fixed versions
+        run: |
+          git clone --depth 1 --branch 2.0.0 https://github.com/VDA5050/VDA5050 schemas-2.0.0
+          git clone --depth 1 --branch 2.1.0 https://github.com/VDA5050/VDA5050 schemas-2.1.0
+      - name: Build
+        run: |
+          cmake -S vda5050_core -B build -G Ninja -DBUILD_TESTING=OFF
+          cmake --build build --target emit_samples
+      - name: Validate
+        run: >
+          bash vda5050_core/test/run_schema_conformance.sh build/emit_samples
+          schemas-2.0.0/json_schemas schemas-2.1.0/json_schemas
+
+  coverage:
+    name: Test coverage of vda5050_core
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y libgtest-dev ninja-build gcovr
+      - name: Build with coverage instrumentation
+        run: |
+          cmake -S vda5050_core -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0"
+          cmake --build build
+      - name: Run the unit tests
+        run: ./build/vda5050_core_tests
+      - name: Report (fails below 95 % line coverage)
+        run: >
+          gcovr --root . --filter 'vda5050_core/src/' --object-directory build
+          --print-summary --fail-under-line 95
 

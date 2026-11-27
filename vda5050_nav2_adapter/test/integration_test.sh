@@ -4,9 +4,15 @@
 #
 # End-to-end test of the adapter executable.
 #
-# Real: the adapter node, a Mosquitto broker, tf2, the ROS 2 action protocol.
-# Fake: Nav2 (fake_nav2_server.py succeeds every goal after 0.5 s) and the
-#       robot pose (a static transform map -> base_link at the origin).
+# Real: the adapter node (started through its launch file), a Mosquitto
+#       broker, tf2, the ROS 2 action protocol.
+# Fake: Nav2 (fake_nav2_server.py succeeds every goal after a few seconds) and
+#       the robot pose (a static transform map -> base_link at the origin).
+#
+# Besides the normal message flow it covers three connection events:
+#   - the broker dies and comes back while an order is being driven
+#   - the adapter is stopped cleanly (must announce OFFLINE)
+#   - the adapter is killed (the broker must publish the last will)
 #
 # This script plays master control with mosquitto_pub and checks what the
 # vehicle publishes. Run it with ROS 2 and the workspace sourced.
@@ -47,20 +53,38 @@ wait_for() {
   fail "$description (no message matched: $pattern)"
 }
 
+# Like wait_for, but only looks at messages recorded after `mark` was called.
+MARK=0
+mark() { MARK=$(wc -l <"$LOG"); }
+wait_for_new() {
+  local description="$1" timeout="$2" pattern="$3"
+  for _ in $(seq 1 $((timeout * 5))); do
+    if tail -n +"$((MARK + 1))" "$LOG" | grep -Eq "$pattern"; then
+      echo "ok: $description"
+      return 0
+    fi
+    sleep 0.2
+  done
+  fail "$description (no new message matched: $pattern)"
+}
+
+start_broker() { mosquitto -p 1883 >/dev/null 2>&1 & BROKER_PID=$!; PIDS+=("$BROKER_PID"); sleep 1; }
+start_recorder() { mosquitto_sub -v -t "${PREFIX}/#" >>"$LOG" & RECORDER_PID=$!; PIDS+=("$RECORDER_PID"); }
+
 send() {  # send <topic> <payload>
   mosquitto_pub -t "${PREFIX}/$1" -m "$2"
 }
 
 echo "== starting broker, recorder, fake robot =="
-mosquitto -p 1883 >/dev/null 2>&1 & PIDS+=($!)
-sleep 1
-mosquitto_sub -v -t "${PREFIX}/#" >"$LOG" & PIDS+=($!)
+start_broker
+start_recorder
 ros2 run tf2_ros static_transform_publisher --frame-id map --child-frame-id base_link \
   >/dev/null 2>&1 & PIDS+=($!)
-python3 "${HERE}/fake_nav2_server.py" & PIDS+=($!)
+# Each "drive" takes 4 s, long enough to take the broker away in the middle.
+FAKE_NAV_DELAY=4 python3 "${HERE}/fake_nav2_server.py" & PIDS+=($!)
 
-echo "== starting adapter =="
-"$ADAPTER_BIN" --ros-args --params-file "$PARAMS" & ADAPTER_PID=$!
+echo "== starting adapter through its launch file =="
+ros2 launch vda5050_nav2_adapter adapter.launch.py params_file:="$PARAMS" & ADAPTER_PID=$!
 PIDS+=("$ADAPTER_PID")
 
 wait_for "vehicle announces ONLINE" 20 \
@@ -104,13 +128,51 @@ send instantActions "{${HEADER},\"actions\":[{\"actionType\":\"factsheetRequest\
 wait_for "factsheet published" 10 \
   "^${PREFIX}/factsheet .*\"typeSpecification\""
 
+echo "== broker outage while an order is being driven =="
+# N1 has no coordinates here: the vehicle accepts it because it is the node it
+# last reached (the fake robot pose never moves from the origin).
+send order "{${HEADER},\"orderId\":\"o2\",\"orderUpdateId\":0,\"nodes\":[\
+{\"nodeId\":\"N1\",\"sequenceId\":0,\"released\":true,\"actions\":[]},\
+{\"nodeId\":\"N2\",\"sequenceId\":2,\"released\":true,\"actions\":[],\"nodePosition\":{\"x\":2,\"y\":0,\"mapId\":\"map\"}}],\
+\"edges\":[{\"edgeId\":\"E1\",\"sequenceId\":1,\"released\":true,\"startNodeId\":\"N1\",\"endNodeId\":\"N2\",\"actions\":[]}]}"
+wait_for "order o2 accepted and vehicle driving" 10 \
+  "^${PREFIX}/state .*\"driving\":true.*\"orderId\":\"o2\""
+kill "$BROKER_PID"
+echo "   broker stopped; the drive finishes while the vehicle is offline"
+sleep 7
+if grep -Eq "^${PREFIX}/state .*\"lastNodeId\":\"N2\"" "$LOG"; then
+  fail "arrival at N2 was reported before the broker went away; the outage tested nothing"
+fi
+mark
+start_broker
+start_recorder
+echo "   broker restarted"
+wait_for_new "vehicle reconnects by itself and announces ONLINE" 60 \
+  "^${PREFIX}/connection .*\"connectionState\":\"ONLINE\""
+send instantActions "{${HEADER},\"actions\":[{\"actionType\":\"stateRequest\",\"actionId\":\"s2\",\"blockingType\":\"NONE\"}]}"
+wait_for_new "progress made offline is reported: o2 finished at N2, no errors" 15 \
+  "^${PREFIX}/state .*\"actionId\":\"s2\",\"actionStatus\":\"FINISHED\".*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"N2\".*\"nodeStates\":\[\].*\"orderId\":\"o2\""
+
 echo "== clean shutdown (SIGINT) =="
+mark
 kill -INT "$ADAPTER_PID"
-wait_for "vehicle announces OFFLINE before leaving" 10 \
+wait_for_new "vehicle announces OFFLINE before leaving" 10 \
   "^${PREFIX}/connection .*\"connectionState\":\"OFFLINE\""
+sleep 2
 if grep -q "CONNECTIONBROKEN" "$LOG"; then
   fail "last will was published on a clean shutdown"
 fi
 echo "ok: last will not triggered"
 
+echo "== crash: the adapter is killed without warning =="
+mark
+"$ADAPTER_BIN" --ros-args --params-file "$PARAMS" & CRASH_PID=$!
+PIDS+=("$CRASH_PID")
+wait_for_new "vehicle is ONLINE again" 20 \
+  "^${PREFIX}/connection .*\"connectionState\":\"ONLINE\""
+kill -9 "$CRASH_PID"
+wait_for_new "broker publishes the last will: CONNECTIONBROKEN" 30 \
+  "^${PREFIX}/connection .*\"connectionState\":\"CONNECTIONBROKEN\""
+
 echo "PASS: integration test"
+exit 0

@@ -23,8 +23,15 @@
 #      cancelOrder, then order orecover from where the robot
 #        now stands back to A                                 must complete
 #   4. order o3: A -> C, cancelled while driving              must stop cleanly
-#   5. order o4: from the current position to D, which lies
-#        beyond a row of pillars                              must complete
+#   5. (Gazebo only) order oblock: A -> C, and a box is dropped
+#        into the path once the robot is moving. The box is not
+#        on the map; only the lidar can see it.                either Nav2 gets
+#        round it and the order completes, or Nav2 gives up and
+#        the vehicle reports a navigationError. Both are valid;
+#        the test checks the adapter's state is right for
+#        whichever happened, and prints which.
+#   6. order o4: back to A, then to D, which lies beyond a
+#        row of pillars                                       must complete
 
 set -uo pipefail
 
@@ -300,15 +307,66 @@ if grep -Eq "^${PREFIX}/state .*\"lastNodeId\":\"C\".*\"orderId\":\"o3\"" "$LOG"
 fi
 echo "ok: vehicle did not reach C"
 
-echo "== 5. order o4: to D (${DX}, ${DY}), beyond a row of pillars =="
+return_to_a() {  # return_to_a <orderId>
+  sleep 2
+  read -r HX HY < <(current_position)
+  send order "{${HEADER},\"orderId\":\"$1\",\"orderUpdateId\":0,\"nodes\":[$(node H 0 $HX $HY),$(node A 2 $AX $AY)],\"edges\":[$(edge HA 1 H A)]}"
+  wait_for "vehicle back at A" 90 \
+    "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"A\".*\"nodeStates\":\[\].*\"orderId\":\"$1\""
+  sleep 1.5
+}
+
+if [ "$SIMULATOR" = "gazebo" ]; then
+  echo "== 5. order oblock: A -> C with a box dropped into the path =="
+  BOX_X=-2.0; BOX_Y=0.05
+  return_to_a oreturn1
+  WORLD="$(gz topic -l 2>/dev/null | grep -o '^/world/[^/]*' | head -n 1 | cut -d/ -f3)"
+  [ -n "$WORLD" ] || fail "could not determine the Gazebo world name"
+  VIS_MARK=$(wc -l <"$LOG")
+  STALLS_BEFORE=$(grep -c "Failed to make progress" "$NAV2_LOG")
+  BLOCK_T0=$(date +%s)
+  send order "{${HEADER},\"orderId\":\"oblock\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node C 2 $CX $CY)],\"edges\":[$(edge AC 1 A C)]}"
+  wait_for "vehicle driving" 15 "^${PREFIX}/state .*\"driving\":true.*\"orderId\":\"oblock\""
+  ros2 run ros_gz_sim create -world "$WORLD" -name obstacle_box -x "$BOX_X" -y "$BOX_Y" -z 0.15 -string \
+    '<sdf version="1.8"><model name="obstacle_box"><static>true</static><link name="link"><collision name="c"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></collision><visual name="v"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></visual></link></model></sdf>' \
+    >/dev/null 2>&1 || fail "could not spawn the obstacle in Gazebo world '${WORLD}'"
+  echo "   box (0.3 m cube) spawned at (${BOX_X}, ${BOX_Y}) in world '${WORLD}', between the robot and C"
+
+  DONE="^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"C\".*\"nodeStates\":\[\].*\"orderId\":\"oblock\""
+  GAVE_UP="^${PREFIX}/state .*\"driving\":false.*\"errorLevel\":\"FATAL\".*\"errorType\":\"navigationError\".*\"orderId\":\"oblock\""
+  OUTCOME=""
+  for _ in $(seq 1 $((300 * 5))); do
+    if grep -Eq "$DONE" "$LOG"; then OUTCOME="completed"; break; fi
+    if grep -Eq "$GAVE_UP" "$LOG"; then OUTCOME="gave up"; break; fi
+    sleep 0.2
+  done
+  [ -n "$OUTCOME" ] || fail "order oblock neither completed nor failed within 300 s"
+  sleep 1.5
+  # How close did the robot's reported position come to the centre of the box?
+  tail -n +"$((VIS_MARK + 1))" "$LOG" | grep "^${PREFIX}/visualization " | python3 -c "
+import json, math, sys
+closest = min(math.hypot(p['x'] - ($BOX_X), p['y'] - ($BOX_Y))
+              for p in (json.loads(line.split(' ', 1)[1])['agvPosition'] for line in sys.stdin))
+print(f'   closest approach to the centre of the box: {closest:.2f} m (box half-width 0.15 m)')"
+  echo "   outcome: Nav2 ${OUTCOME} after $(( $(date +%s) - BLOCK_T0 )) s, with $(( $(grep -c "Failed to make progress" "$NAV2_LOG") - STALLS_BEFORE )) controller stall(s)"
+  if [ "$OUTCOME" = "completed" ]; then
+    expect_position "order completed: robot got round the box and is at C" "$CX" "$CY" "$TOLERANCE"
+  else
+    echo "ok: vehicle halted and reported a FATAL navigationError"
+    instant cblock cancelOrder
+    wait_for "cancel clears the blocked order" 15 \
+      "^${PREFIX}/state .*\"actionId\":\"cblock\",\"actionStatus\":\"FINISHED\".*\"nodeStates\":\[\].*\"orderId\":\"oblock\""
+  fi
+  # Take the box away again so the rest of the test runs in the original world.
+  gz service -s "/world/${WORLD}/remove" --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean \
+    --timeout 3000 --req 'name: "obstacle_box" type: MODEL' >/dev/null 2>&1
+  sleep 3
+fi
+
+echo "== 6. order o4: to D (${DX}, ${DY}), beyond a row of pillars =="
 # Start from A so the approach to the gap between the pillars is the same on
-# every run. After the cancel above the robot is wherever it happened to stop.
-sleep 2
-read -r HX HY < <(current_position)
-send order "{${HEADER},\"orderId\":\"oreturn\",\"orderUpdateId\":0,\"nodes\":[$(node H 0 $HX $HY),$(node A 2 $AX $AY)],\"edges\":[$(edge HA 1 H A)]}"
-wait_for "vehicle back at A" 60 \
-  "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"A\".*\"nodeStates\":\[\].*\"orderId\":\"oreturn\""
-sleep 1.5
+# every run, wherever the earlier scenarios left the robot.
+return_to_a oreturn2
 read -r HX HY < <(current_position)
 echo "   starting from (${HX}, ${HY})"
 STALLS_BEFORE=$(grep -c "Failed to make progress" "$NAV2_LOG")
