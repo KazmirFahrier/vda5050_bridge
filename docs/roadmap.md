@@ -16,7 +16,7 @@
 - Longer multi-node orders with order updates extending the base
 
 ### 2. Failure-path tests for the adapter
-- An order to an unreachable node (Nav2 aborts): expect `navigationError`, then recover with `cancelOrder`
+- A path that becomes blocked while driving (needs obstacles in simulation)
 - Broker restart during an order
 
 ### 3. Verification infrastructure

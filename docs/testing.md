@@ -139,7 +139,7 @@ simulator on the TurtleBot3 world map.
   commands directly into motion. There are no sensors, no localisation error,
   no obstacles and no physics.
 
-Three orders along a free strip of the map:
+Four scenarios along a free strip of the map:
 
 1. **A -> B -> C.** Both legs are driven; the test checks the intermediate
    state at B, completion at C with no errors, and that the reported position
@@ -147,7 +147,13 @@ Three orders along a free strip of the map:
 2. **C -> A with pause and resume.** While driving, `startPause`: state shows
    paused and not driving, and the leg does not complete during three seconds.
    After `stopPause` the order completes at A with no errors.
-3. **A -> C, cancelled.** While driving, `cancelOrder`: the cancel action
+3. **A -> X, where X is off the map.** Nav2 fails the goal. The test checks a
+   `FATAL` `navigationError`, that the vehicle is not driving, still lists X
+   ahead and does not retry; that `cancelOrder` clears the order; and that a
+   fresh order from the robot's reported position then completes with an empty
+   error list. In CI the failure arrived within about 0.2 s, so this is Nav2
+   refusing an impossible goal, not giving up after trying.
+4. **A -> C, cancelled.** While driving, `cancelOrder`: the cancel action
    reaches `FINISHED`, the vehicle is stopped, the route is cleared, no error is
    raised and C is not reached.
 
@@ -187,8 +193,9 @@ The core was additionally built locally in Release with
 
 Read this before claiming more than is true.
 
-- **Navigation failure.** Rejected and aborted goals (a blocked or impossible
-  path) are implemented but not exercised by any test against Nav2.
+- **A path blocked part-way.** The failure test uses a goal Nav2 refuses
+  immediately. Failure after the vehicle has started moving, with Nav2's
+  recovery behaviours running first, is not exercised.
 - **A physics simulator or physical robot.** The Nav2 test uses the loopback
   simulator: no sensors, localisation, obstacles or dynamics.
 - **A real fleet manager.** Master control is a shell script.
@@ -208,7 +215,7 @@ Read this before claiming more than is true.
 | Layer | Tooling |
 |---|---|
 | Schema conformance: validate encoded messages against the official JSON schemas | Python `jsonschema` in CI |
-| Navigation failure paths: goals that Nav2 rejects or aborts | extend the system test with an unreachable node |
+| A path that becomes blocked while driving | needs a simulator with obstacles |
 | Lifecycle transitions driven externally, via the launch file | `launch_testing` |
 | Bring-up with a physics simulator (sensors, localisation) | Nav2 TurtleBot bring-up with Gazebo |
 | Fuzzing the decoder | libFuzzer |

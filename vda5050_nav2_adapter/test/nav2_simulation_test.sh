@@ -14,7 +14,11 @@
 # Scenario, on the TurtleBot3 world map, along the free strip at x = -2:
 #   1. order o1: A -> B -> C (two legs)                       must complete
 #   2. order o2: C -> A, paused and resumed while driving     must complete
-#   3. order o3: A -> C, cancelled while driving              must stop cleanly
+#   3. order ofail: A -> X, where X is off the map            Nav2 must fail;
+#        the vehicle must halt and report a FATAL navigationError
+#      cancelOrder, then order orecover from where the robot
+#        now stands back to A                                 must complete
+#   4. order o3: A -> C, cancelled while driving              must stop cleanly
 
 set -uo pipefail
 
@@ -168,7 +172,39 @@ wait_for "order completed at A after resume, no errors" 90 \
 sleep 1.5
 expect_position "robot really is at A" "$AX" "$AY" 0.4
 
-echo "== 3. order o3: A -> C, cancelled while driving =="
+echo "== 3. order ofail: A -> X, a node Nav2 cannot reach =="
+# X lies far outside the map, so Nav2 can never produce a path and gives up.
+send order "{${HEADER},\"orderId\":\"ofail\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node X 2 50.0 50.0)],\"edges\":[$(edge AX 1 A X)]}"
+wait_for "Nav2 gave up: FATAL navigationError, halted, X still listed ahead" 240 \
+  "^${PREFIX}/state .*\"driving\":false.*\"errorLevel\":\"FATAL\".*\"errorType\":\"navigationError\".*\"lastNodeId\":\"A\".*\"nodeStates\":\[\{.*\"orderId\":\"ofail\""
+grep -E "^${PREFIX}/state .*\"errorType\":\"navigationError\"" "$LOG" | tail -n 1 | python3 -c "
+import json, sys
+state = json.loads(sys.stdin.readline().split(' ', 1)[1])
+print('   reported error:', state['errors'][0]['errorDescription'])"
+sleep 3
+if grep -E "^${PREFIX}/state .*\"orderId\":\"ofail\"" "$LOG" | tail -n 1 | grep -q '"driving":true'; then
+  fail "vehicle retried the failed leg on its own"
+fi
+echo "ok: no automatic retry after the failure"
+
+instant c0 cancelOrder
+wait_for "cancel clears the failed order" 15 \
+  "^${PREFIX}/state .*\"actionId\":\"c0\",\"actionStatus\":\"FINISHED\".*\"driving\":false.*\"nodeStates\":\[\].*\"orderId\":\"ofail\""
+
+# Nav2's recovery behaviours (spin, back up) may have moved the robot, so the
+# next order starts from wherever it reports being now.
+read -r HX HY < <(grep "^${PREFIX}/visualization " "$LOG" | tail -n 1 | python3 -c "
+import json, sys
+position = json.loads(sys.stdin.readline().split(' ', 1)[1])['agvPosition']
+print(f\"{position['x']:.3f} {position['y']:.3f}\")")
+echo "   robot is now at (${HX}, ${HY})"
+send order "{${HEADER},\"orderId\":\"orecover\",\"orderUpdateId\":0,\"nodes\":[$(node H 0 $HX $HY),$(node A 2 $AX $AY)],\"edges\":[$(edge HA 1 H A)]}"
+wait_for "vehicle recovers: new order completes at A, error list cleared" 90 \
+  "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"A\".*\"nodeStates\":\[\].*\"orderId\":\"orecover\""
+sleep 1.5
+expect_position "robot really is at A" "$AX" "$AY" 0.4
+
+echo "== 4. order o3: A -> C, cancelled while driving =="
 send order "{${HEADER},\"orderId\":\"o3\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node C 2 $CX $CY)],\"edges\":[$(edge AC 1 A C)]}"
 wait_for "vehicle driving" 15 "^${PREFIX}/state .*\"driving\":true.*\"orderId\":\"o3\""
 sleep 1

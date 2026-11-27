@@ -114,6 +114,7 @@ real ones; only the robot is simulated) on the TurtleBot3 world map, then:
 |---|---|
 | o1: A -> B -> C | Two legs driven; state reports B, then completion at C with no errors; reported position within 0.4 m of C |
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
+| ofail: A -> X, with X off the map | Nav2 fails the goal; state shows a `FATAL` `navigationError`, not driving, X still listed ahead; no retry. `cancelOrder` clears it; a fresh order from the robot's position completes and the error list is empty again |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
 
 In the recorded CI runs the robot stopped 0.22 to 0.24 m from each target node.
@@ -128,6 +129,6 @@ libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 
 - TLS for the MQTT connection
 - `diagnostic_msgs` output
-- Unit tests for the individual adapter classes, and tests of navigation
-  failure (rejected or aborted goals).
+- Unit tests for the individual adapter classes, and a test of a path that
+  becomes blocked after the vehicle has started driving.
 - `NavigateThroughPoses` for smoother motion across several released nodes
