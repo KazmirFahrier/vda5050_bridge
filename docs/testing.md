@@ -5,7 +5,7 @@
 | Package | Automated tests | Where they run |
 |---|---|---|
 | `vda5050_core` | 96 unit tests, 1 end-to-end example | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | 1 integration test | GitHub Actions, ROS 2 Jazzy container, real Mosquitto broker, fake Nav2 |
+| `vda5050_nav2_adapter` | 1 integration test, 1 system test | GitHub Actions, ROS 2 Jazzy container. Integration: real Mosquitto broker, fake Nav2. System: real broker, real Nav2, simulated robot |
 
 ## How to run
 
@@ -127,6 +127,38 @@ content is not inspected); a malformed order reported as
 `validationError`; the factsheet on request; and on SIGINT, `OFFLINE`
 published without the last will firing.
 
+## The Nav2 system test
+
+`vda5050_nav2_adapter/test/nav2_simulation_test.sh` replaces the fake action
+server with the real Nav2 stack, launched from `nav2_bringup` with the loopback
+simulator on the TurtleBot3 world map.
+
+- **Real:** the adapter, the broker, and Nav2's map server, planner,
+  controller, behaviour-tree navigator and costmaps.
+- **Simulated:** the robot. The loopback simulator turns Nav2's velocity
+  commands directly into motion. There are no sensors, no localisation error,
+  no obstacles and no physics.
+
+Three orders along a free strip of the map:
+
+1. **A -> B -> C.** Both legs are driven; the test checks the intermediate
+   state at B, completion at C with no errors, and that the reported position
+   is within 0.4 m of C.
+2. **C -> A with pause and resume.** While driving, `startPause`: state shows
+   paused and not driving, and the leg does not complete during three seconds.
+   After `stopPause` the order completes at A with no errors.
+3. **A -> C, cancelled.** While driving, `cancelOrder`: the cancel action
+   reaches `FINISHED`, the vehicle is stopped, the route is cleared, no error is
+   raised and C is not reached.
+
+One thing the first run showed: the test passed but the CI step failed, because
+the script's cleanup killed every process with "nav2" in its command line,
+which included the script itself. A green log with a red job is worth reading
+to the end.
+
+Observed stopping distance from the target node was 0.23 to 0.24 m, which is
+Nav2's default goal tolerance.
+
 ## What the first real build found
 
 The adapter was written without ROS installed. Its first CI runs found three
@@ -146,6 +178,7 @@ problems, none of which the earlier stand-in-header syntax check could have:
 | Standalone CMake, Clang, same flags | 96/96 pass, example passes |
 | colcon on `ros:jazzy`, both packages | builds with no warnings; 96/96 pass |
 | Integration test on `ros:jazzy` | passes |
+| Nav2 system test on `ros:jazzy` | passes |
 
 The core was additionally built locally in Release with
 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror`.
@@ -154,10 +187,10 @@ The core was additionally built locally in Release with
 
 Read this before claiming more than is true.
 
-- **Real Nav2.** The action server in the test always succeeds. Rejected goals,
-  aborted goals, cancel and pause/resume through the action interface are
-  implemented but not exercised by any test.
-- **A simulator or physical robot.**
+- **Navigation failure.** Rejected and aborted goals (a blocked or impossible
+  path) are implemented but not exercised by any test against Nav2.
+- **A physics simulator or physical robot.** The Nav2 test uses the loopback
+  simulator: no sensors, localisation, obstacles or dynamics.
 - **A real fleet manager.** Master control is a shell script.
 - **The launch file** has not been executed; the test starts the binary directly.
 - **Reconnect behaviour** after a broker outage (implemented in the core and
@@ -175,7 +208,7 @@ Read this before claiming more than is true.
 | Layer | Tooling |
 |---|---|
 | Schema conformance: validate encoded messages against the official JSON schemas | Python `jsonschema` in CI |
-| Navigation failure paths: a fake action server that rejects, aborts and honours cancel | extend the integration test |
+| Navigation failure paths: goals that Nav2 rejects or aborts | extend the system test with an unreachable node |
 | Lifecycle transitions driven externally, via the launch file | `launch_testing` |
-| Bring-up with real Nav2 in simulation | Nav2 TurtleBot bring-up |
+| Bring-up with a physics simulator (sensors, localisation) | Nav2 TurtleBot bring-up with Gazebo |
 | Fuzzing the decoder | libFuzzer |

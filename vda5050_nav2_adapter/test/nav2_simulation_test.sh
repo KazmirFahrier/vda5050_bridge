@@ -39,9 +39,14 @@ CX=-2.0; CY=0.5
 
 PIDS=()
 cleanup() {
+  # ros2 launch forwards SIGINT to everything it started.
+  [ -n "${LAUNCH_PID:-}" ] && kill -INT "$LAUNCH_PID" 2>/dev/null
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null; done
-  pkill -f nav2 2>/dev/null
+  sleep 2
+  # Stragglers. The patterns must not match this script's own name.
   pkill -f component_container 2>/dev/null
+  pkill -f loopback_simulator 2>/dev/null
+  return 0
 }
 trap cleanup EXIT
 
@@ -101,7 +106,7 @@ mosquitto_sub -v -t "${PREFIX}/#" >"$LOG" & PIDS+=($!)
 
 echo "== starting Nav2 with the loopback simulator (${NAV2_LAUNCH}) =="
 ros2 launch nav2_bringup "$NAV2_LAUNCH" use_rviz:=False >"$NAV2_LOG" 2>&1 &
-PIDS+=($!)
+LAUNCH_PID=$!
 
 echo "waiting for Nav2 to become active..."
 ACTIVE=0
@@ -180,3 +185,4 @@ kill -INT "$ADAPTER_PID"
 wait_for "vehicle announces OFFLINE" 10 "^${PREFIX}/connection .*\"connectionState\":\"OFFLINE\""
 
 echo "PASS: Nav2 simulation test"
+exit 0

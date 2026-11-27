@@ -18,8 +18,9 @@ as the rest; interviewers probe exactly there.
 > 96 unit tests that run in milliseconds. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
-The whole thing builds in CI on ROS 2 Jazzy, and an integration test runs the
-node against a real MQTT broker with a fake Nav2 action server.
+The whole thing builds in CI on ROS 2 Jazzy. One test runs the node against a
+real MQTT broker; another drives orders through the real Nav2 stack with a
+simulated robot, including pause, resume and cancel.
 
 ## 2-minute version: add these three points
 
@@ -176,11 +177,11 @@ periodic rule testable with a fake clock (ADR-014).
 
 State these before you are asked.
 
-- It has never run against real Nav2, a simulator, a robot or a real fleet
-  manager. The integration test uses a fake action server that always succeeds
-  and a script in place of master control.
-- The adapter's failure paths (rejected or aborted goals, cancel, pause) are
-  implemented but untested.
+- It has never run with a physics simulator, on a robot, or against a real
+  fleet manager. The Nav2 test uses Nav2's loopback simulator (no sensors,
+  localisation or obstacles) and a script in place of master control.
+- Navigation failure paths (rejected or aborted goals) are implemented but
+  untested.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

@@ -5,18 +5,18 @@
 | Area | State |
 |---|---|
 | `vda5050_core` | Implemented; 96 unit tests pass in CI |
-| `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; one integration test passes in CI |
-| CI | Green: two standalone jobs, colcon build and test, integration test |
+| `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test pass in CI |
+| CI | Green: two standalone jobs, colcon build and test, integration test, Nav2 system test |
 
 ## Next steps, in order
 
-### 1. Bring-up against real Nav2 in simulation
-- Run with the Nav2 TurtleBot bring-up and a local Mosquitto broker
-- Send multi-node orders; check goal orientation and stopping accuracy
-- Exercise cancel, pause/resume and a blocked path
+### 1. Bring-up with a physics simulator
+- Nav2 TurtleBot bring-up with Gazebo, so localisation and sensors are in the loop
+- Check stopping accuracy against `allowedDeviationXY`; tune the Nav2 goal tolerance
+- Longer multi-node orders with order updates extending the base
 
 ### 2. Failure-path tests for the adapter
-- Fake action server that rejects goals, aborts, and honours cancel
+- An order to an unreachable node (Nav2 aborts): expect `navigationError`, then recover with `cancelOrder`
 - Broker restart during an order
 
 ### 3. Verification infrastructure

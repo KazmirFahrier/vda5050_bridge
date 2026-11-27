@@ -2,9 +2,10 @@
 
 ROS 2 lifecycle node that makes a Nav2 robot a VDA 5050 vehicle.
 
-**Status.** Builds on ROS 2 Jazzy without warnings. An integration test in CI
-runs the node against a real Mosquitto broker, tf2 and a fake `NavigateToPose`
-server. It has not been run against real Nav2, a simulator or a robot.
+**Status.** Builds on ROS 2 Jazzy without warnings. CI runs it against a real
+Mosquitto broker and against the real Nav2 stack with Nav2's loopback
+simulator as the robot. It has not been run with a physics simulator or on a
+physical robot.
 
 ## What it does
 
@@ -103,6 +104,22 @@ master control with `mosquitto_pub` and checks what the vehicle publishes:
 | `factsheetRequest` | Factsheet published |
 | SIGINT | `OFFLINE` published; last will not triggered |
 
+## System test with real Nav2
+
+`test/nav2_simulation_test.sh` launches `nav2_bringup`'s loopback simulation
+(map server, planner, controller, behaviour-tree navigator and costmaps are the
+real ones; only the robot is simulated) on the TurtleBot3 world map, then:
+
+| Order | Checked |
+|---|---|
+| o1: A -> B -> C | Two legs driven; state reports B, then completion at C with no errors; reported position within 0.4 m of C |
+| o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
+| o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
+
+In the recorded run the robot stopped 0.23 to 0.24 m from each target node.
+That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
+deployment needs to set it tighter than the fleet manager's `allowedDeviationXY`.
+
 What the first real build found, for the record: a missing rosdep key for
 libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 `-Wdangling-reference`), and a retained `ONLINE` left behind on Ctrl-C.
@@ -111,7 +128,6 @@ libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 
 - TLS for the MQTT connection
 - `diagnostic_msgs` output
-- Unit tests for the individual adapter classes, and tests of pause, cancel
-  and navigation failure through the action interface. The integration test
-  covers the success path only.
+- Unit tests for the individual adapter classes, and tests of navigation
+  failure (rejected or aborted goals).
 - `NavigateThroughPoses` for smoother motion across several released nodes
