@@ -158,7 +158,8 @@ LAUNCH_PID=$!
 echo "waiting for Nav2 to become active..."
 ACTIVE=0
 for i in $(seq 1 $((NAV2_START_TIMEOUT / 2))); do
-  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "active"; then
+  # Anchored on purpose: a plain "active" would also match "inactive".
+  if ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; then
     ACTIVE=1
     break
   fi
@@ -170,6 +171,34 @@ for i in $(seq 1 $((NAV2_START_TIMEOUT / 2))); do
 done
 [ "$ACTIVE" = 1 ] || fail "Nav2 did not become active within ${NAV2_START_TIMEOUT} s"
 echo "ok: Nav2 is active"
+
+if [ "$SIMULATOR" = "gazebo" ]; then
+  echo "== checking that the simulated sensors and localisation are really running =="
+  pgrep -f "gz sim" >/dev/null || fail "Gazebo (gz sim) is not running"
+  echo "ok: Gazebo process is running"
+
+  ros2 node list 2>/dev/null | grep -q "^/amcl$" || fail "AMCL node is not running"
+  echo "ok: AMCL node is running"
+
+  # One lidar scan: it must contain real range readings, i.e. the simulated
+  # lidar is being rendered and actually sees the walls and pillars.
+  timeout 60 ros2 topic echo /scan --once --field ranges 2>/dev/null | python3 -c "
+import math, re, sys
+values = [float(v) for v in re.findall(r'-?[0-9]+\.[0-9]+(?:e-?[0-9]+)?|inf|nan', sys.stdin.read())]
+hits = [v for v in values if math.isfinite(v) and v > 0.0]
+print(f'   lidar scan: {len(values)} beams, {len(hits)} with a finite range'
+      + (f', nearest obstacle {min(hits):.2f} m' if hits else ''))
+sys.exit(0 if len(hits) >= 20 else 1)" || fail "no usable lidar scan on /scan"
+  echo "ok: lidar is publishing real ranges"
+
+  # Simulation time must be advancing.
+  T1="$(timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | head -n 1)"
+  sleep 3
+  T2="$(timeout 20 ros2 topic echo /clock --once --field clock.sec 2>/dev/null | head -n 1)"
+  echo "   simulation clock: ${T1} s -> ${T2} s"
+  [ -n "$T1" ] && [ -n "$T2" ] && [ "$T2" -gt "$T1" ] || fail "simulation time is not advancing"
+  echo "ok: simulation time is advancing"
+fi
 
 echo "== starting adapter =="
 "$ADAPTER_BIN" --ros-args --params-file "$PARAMS" & ADAPTER_PID=$!
@@ -269,6 +298,18 @@ wait_for "order completed at D with no errors" 120 \
   "^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"D\".*\"nodeStates\":\[\].*\"orderId\":\"o4\""
 sleep 1.5
 expect_position "robot really is at D, between the pillars" "$DX" "$DY" "$TOLERANCE"
+
+if [ "$SIMULATOR" = "gazebo" ]; then
+  # AMCL's own estimate, to show the reported position came from localisation.
+  timeout 20 ros2 topic echo /amcl_pose --once --qos-durability transient_local \
+    --qos-reliability reliable --field pose.pose.position 2>/dev/null | tr '\n' ' ' | \
+    sed 's/^/   AMCL pose estimate: /; s/ ---.*//'
+  echo
+fi
+
+echo "== Nav2 log summary =="
+echo "   errors: $(grep -c "\[ERROR\]" "$NAV2_LOG")   warnings: $(grep -c "\[WARN\]" "$NAV2_LOG")"
+grep "\[ERROR\]" "$NAV2_LOG" | sed 's/^\[[^]]*\] //' | cut -c1-200 | sort | uniq -c | sort -rn | head -n 12
 
 echo "== clean shutdown =="
 kill -INT "$ADAPTER_PID"
