@@ -252,6 +252,26 @@ TEST(Codec, EncodesConnection)
   EXPECT_EQ(json.find("serialNumber")->as_string(), "amr-001");
 }
 
+TEST(Codec, AcceptsActionNameInPlaceOfActionType)
+{
+  // What the official 2.0.0 instantActions schema describes.
+  const InstantActions message = decode_instant_actions(
+    R"({"headerId":3,"timestamp":"t","version":"2.0.0","manufacturer":"m","serialNumber":"s",)"
+    R"("actions":[{"actionName":"cancelOrder","actionId":"c1","blockingType":"HARD"}]})");
+  ASSERT_EQ(message.actions.size(), 1u);
+  EXPECT_EQ(message.actions[0].action_type, "cancelOrder");
+
+  // Neither field present is still an error, and it names actionType.
+  try {
+    decode_instant_actions(
+      R"({"headerId":3,"timestamp":"t","version":"2.0.0","manufacturer":"m","serialNumber":"s",)"
+      R"("actions":[{"actionId":"c1","blockingType":"HARD"}]})");
+    EXPECT_TRUE(false) << "expected DecodeError";
+  } catch (const DecodeError & error) {
+    EXPECT_TRUE(contains(error.what(), "actions[0].actionType: missing required field"));
+  }
+}
+
 TEST(Codec, AcceptsLegacyInstantActionsKey)
 {
   const InstantActions message = decode_instant_actions(
@@ -320,6 +340,12 @@ TEST(Codec, EncodesFactsheetWithSchemaRequiredFields)
   EXPECT_DOUBLE_EQ(limits->find("timing")->find("minStateInterval")->as_number(), 0.05);
   EXPECT_DOUBLE_EQ(limits->find("timing")->find("defaultStateInterval")->as_number(), 30.0);
   EXPECT_EQ(limits->find("timing")->find("visualizationInterval"), nullptr);
+
+  // Required by the schema; empty because geometry and loads are not modelled.
+  ASSERT_NE(json.find("agvGeometry"), nullptr);
+  EXPECT_TRUE(json.find("agvGeometry")->is_object());
+  ASSERT_NE(json.find("loadSpecification"), nullptr);
+  EXPECT_TRUE(json.find("loadSpecification")->is_object());
 
   const Json * features = json.find("protocolFeatures");
   ASSERT_NE(features, nullptr);

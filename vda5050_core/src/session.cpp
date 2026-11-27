@@ -13,9 +13,10 @@ namespace vda5050_core
 namespace
 {
 
-// QoS and retain settings follow the specification: everything is QoS 0
-// except the connection topic, which is QoS 1 and retained so that a master
-// connecting later still learns the vehicle's last known connection state.
+// QoS and retain settings follow the specification (section 6.2 and the
+// topic descriptions): everything is QoS 0 except the connection topic, which
+// is QoS 1. connection and factsheet are retained, so a master connecting
+// later still learns each vehicle's last connection state and its capabilities.
 constexpr int kDefaultQos = 0;
 constexpr int kConnectionQos = 1;
 
@@ -130,7 +131,7 @@ void Session::tick(TimePoint now)
     factsheet.header = headers_.next("factsheet");
     transport_.publish(
       MqttMessage{
-        topic_name(identity(), "factsheet"), encode_factsheet(factsheet), kDefaultQos, false});
+        topic_name(identity(), "factsheet"), encode_factsheet(factsheet), kDefaultQos, true});
   }
 
   const bool state_due = !last_state_ || now - *last_state_ >= config_.state_interval;

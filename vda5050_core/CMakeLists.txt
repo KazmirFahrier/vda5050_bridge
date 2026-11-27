@@ -52,6 +52,11 @@ install(TARGETS ${PROJECT_NAME}
 add_executable(simulated_vehicle examples/simulated_vehicle.cpp)
 target_link_libraries(simulated_vehicle PRIVATE ${PROJECT_NAME})
 
+# Writes example messages for validation against the official JSON schemas
+# (see test/run_schema_conformance.sh).
+add_executable(emit_samples tools/emit_samples.cpp)
+target_link_libraries(emit_samples PRIVATE ${PROJECT_NAME})
+
 include(CTest)
 if(BUILD_TESTING)
   set(TEST_SOURCES

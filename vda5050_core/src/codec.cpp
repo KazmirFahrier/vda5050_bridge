@@ -151,7 +151,11 @@ Action decode_action(const Json & value, const std::string & path)
 {
   require_object(value, path);
   Action action;
-  action.action_type = required_string(value, "actionType", path);
+  // The 2.0.0 JSON schema for instantActions names this field "actionName"
+  // (a leftover from v1.1); the specification text and the 2.1.0 schema say
+  // "actionType". Accept either so a master built from either is understood.
+  action.action_type = (value.find("actionType") == nullptr && value.find("actionName") != nullptr) ?
+    required_string(value, "actionName", path) : required_string(value, "actionType", path);
   action.action_id = required_string(value, "actionId", path);
   action.action_description = optional_string(value, "actionDescription", path);
   action.blocking_type =
@@ -569,6 +573,11 @@ std::string encode_factsheet(const Factsheet & factsheet)
   features["optionalParameters"] = Json{Json::Array{}};
   features["agvActions"] = std::move(actions);
   out["protocolFeatures"] = std::move(features);
+
+  // Required by the schema, but every member is optional. Geometry and load
+  // handling are not modelled, so both are present and empty.
+  out["agvGeometry"] = Json{Json::Object{}};
+  out["loadSpecification"] = Json{Json::Object{}};
 
   return out.dump();
 }

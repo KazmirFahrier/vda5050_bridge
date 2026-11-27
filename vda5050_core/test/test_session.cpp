@@ -328,6 +328,8 @@ TEST_F(SessionTest, FactsheetIsPublishedOnRequest)
 
   const std::vector<MqttMessage> sheets = transport.on("factsheet");
   ASSERT_EQ(sheets.size(), 1u);  // once per request
+  EXPECT_TRUE(sheets[0].retain);  // the specification requires a retained factsheet
+  EXPECT_EQ(sheets[0].qos, 0);
   const Json json = Json::parse(sheets[0].payload);
   EXPECT_EQ(json.find("typeSpecification")->find("seriesName")->as_string(), "carrier-100");
   EXPECT_EQ(json.find("manufacturer")->as_string(), "acme");
