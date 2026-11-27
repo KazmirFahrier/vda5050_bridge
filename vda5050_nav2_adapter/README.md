@@ -127,9 +127,9 @@ The same script runs in two modes:
 
 Before any order is sent in Gazebo mode, the script asserts that Gazebo is
 running, AMCL exists, a lidar scan carries real ranges (in CI: 360 of 360 beams,
-nearest obstacle about 0.48 m), and simulation time is advancing.
+nearest obstacle about 0.5 m), and simulation time is advancing.
 
-In the recorded CI runs the robot stopped 0.22 to 0.24 m from each target node.
+In the recorded CI runs the robot stopped 0.17 to 0.24 m from each target node.
 That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
 deployment needs to set it tighter than the fleet manager's `allowedDeviationXY`.
 

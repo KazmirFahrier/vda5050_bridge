@@ -165,7 +165,7 @@ asserts, before sending any order:
 
 - the `gz sim` process exists and the `/amcl` node exists
 - one message on `/scan` contains real ranges (in CI: 360 of 360 beams finite,
-  nearest obstacle about 0.48 m, which matches a pillar next to the start)
+  nearest obstacle about 0.5 m)
 - simulation time on `/clock` advances
 
 At the end it prints AMCL's own pose estimate and a summary of errors in the
@@ -177,7 +177,7 @@ Nav2 log.
 |---|---|
 | The readiness check was wrong | It looked for the word `active` in the lifecycle state, which also matches `inactive`. The test moved on before Nav2 was up and still passed, because later steps happened to wait long enough. Found only because a Gazebo start-up of four seconds was not believable. Now anchored |
 | Cleanup killed the test itself | `pkill -f nav2` matched the script's own name: every check passed and the CI step went red |
-| Stopping distance | The robot stops 0.19 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
+| Stopping distance | The robot stops 0.17 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
 | Slow first leg (open) | The first 0.5 m leg after start-up takes about 46 s in both modes; Nav2's controller logs "Failed to make progress" four times. The second 0.5 m leg takes about 4 s and the 2.5 m leg about 6 s. Not yet diagnosed; it may be Nav2 tuning or the goal orientation the adapter sends for the first leg |
 
 ## What the first real build found
