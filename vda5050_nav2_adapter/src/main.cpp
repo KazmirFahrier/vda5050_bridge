@@ -27,7 +27,11 @@ int main(int argc, char ** argv)
     }
   }
 
-  executor.spin();
+  executor.spin();  // returns on SIGINT/SIGTERM
+
+  // Leave the VDA 5050 network cleanly. Without this the retained ONLINE
+  // message would stay on the broker after the process has gone.
+  node->stop();
   rclcpp::shutdown();
   return 0;
 }

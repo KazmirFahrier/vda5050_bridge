@@ -5,6 +5,7 @@
 
 #include <mosquitto.h>
 
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
@@ -26,6 +27,7 @@ MosquittoTransport::MosquittoTransport(Options options)
   mosquitto_connect_callback_set(client_, &MosquittoTransport::on_connect);
   mosquitto_disconnect_callback_set(client_, &MosquittoTransport::on_disconnect);
   mosquitto_message_callback_set(client_, &MosquittoTransport::on_message);
+  mosquitto_publish_callback_set(client_, &MosquittoTransport::on_publish);
   // Reconnect after 1 s, doubling up to 30 s.
   mosquitto_reconnect_delay_set(client_, 1, 30, true);
   if (!options_.username.empty()) {
@@ -76,6 +78,14 @@ void MosquittoTransport::disconnect()
   if (!loop_running_) {
     return;
   }
+  {
+    // Give queued messages (in practice: the final OFFLINE) up to one second
+    // to be sent and, for QoS 1, acknowledged. Bounded, so a dead broker
+    // cannot stall shutdown.
+    std::unique_lock<std::mutex> lock(mutex_);
+    in_flight_changed_.wait_for(
+      lock, std::chrono::seconds(1), [this] {return in_flight_ <= 0;});
+  }
   mosquitto_disconnect(client_);
   mosquitto_loop_stop(client_, false);  // waits for the network thread to finish
   loop_running_ = false;
@@ -83,9 +93,15 @@ void MosquittoTransport::disconnect()
 
 void MosquittoTransport::publish(const vda5050_core::MqttMessage & message)
 {
-  mosquitto_publish(
+  // The lock is held across the call so the publish callback, which runs on
+  // the network thread, cannot decrement the counter before it is incremented.
+  std::lock_guard<std::mutex> lock(mutex_);
+  const int result = mosquitto_publish(
     client_, nullptr, message.topic.c_str(), static_cast<int>(message.payload.size()),
     message.payload.data(), message.qos, message.retain);
+  if (result == MOSQ_ERR_SUCCESS) {
+    ++in_flight_;
+  }
 }
 
 std::vector<TransportEvent> MosquittoTransport::take_events()
@@ -132,6 +148,16 @@ void MosquittoTransport::on_message(
       TransportEvent::Type::Message, message->topic,
       std::string(static_cast<const char *>(message->payload),
       static_cast<std::size_t>(message->payloadlen))});
+}
+
+void MosquittoTransport::on_publish(struct mosquitto *, void * self, int /*message_id*/)
+{
+  auto * transport = static_cast<MosquittoTransport *>(self);
+  {
+    std::lock_guard<std::mutex> lock(transport->mutex_);
+    --transport->in_flight_;
+  }
+  transport->in_flight_changed_.notify_all();
 }
 
 }  // namespace vda5050_nav2_adapter

@@ -47,6 +47,11 @@ public:
   CallbackReturn on_cleanup(const rclcpp_lifecycle::State & state) override;
   CallbackReturn on_shutdown(const rclcpp_lifecycle::State & state) override;
 
+  /// Announce OFFLINE, disconnect and release everything, without going
+  /// through a lifecycle transition. For process exit (Ctrl-C), when the ROS
+  /// context is already shut down and transitions can no longer run.
+  void stop();
+
 private:
   void on_timer();
   void update_position();

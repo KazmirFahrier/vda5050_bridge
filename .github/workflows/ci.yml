@@ -55,3 +55,10 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
+      - name: Integration test (real broker, fake Nav2)
+        shell: bash
+        run: |
+          apt-get install -y mosquitto mosquitto-clients
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh

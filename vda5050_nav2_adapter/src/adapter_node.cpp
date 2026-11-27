@@ -205,6 +205,12 @@ AdapterNode::CallbackReturn AdapterNode::on_shutdown(const rclcpp_lifecycle::Sta
   return CallbackReturn::SUCCESS;
 }
 
+void AdapterNode::stop()
+{
+  go_offline();
+  release_resources();
+}
+
 void AdapterNode::go_offline()
 {
   timer_.reset();
@@ -305,7 +311,10 @@ vda5050_core::Factsheet AdapterNode::build_factsheet(const vda5050_core::Session
     factsheet.agv_actions.push_back(
       vda5050_core::FactsheetAction{builtin, std::nullopt, {"INSTANT"}});
   }
-  for (const std::string & type : get_parameter("supported_actions").as_string_array()) {
+  // Copy first: iterating directly over get_parameter(...).as_string_array()
+  // would read from a Parameter temporary that is already destroyed.
+  const std::vector<std::string> supported = get_parameter("supported_actions").as_string_array();
+  for (const std::string & type : supported) {
     factsheet.agv_actions.push_back(
       vda5050_core::FactsheetAction{type, std::nullopt, {"INSTANT", "NODE", "EDGE"}});
   }
