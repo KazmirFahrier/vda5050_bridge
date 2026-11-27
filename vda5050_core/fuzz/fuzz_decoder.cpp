@@ -5,7 +5,8 @@
 //
 // Build and run (needs Clang):
 //   clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined \
-//     -Ivda5050_core/include vda5050_core/fuzz/fuzz_decoder.cpp vda5050_core/src/*.cpp -o fuzz_decoder
+//     -Ivda5050_core/include vda5050_core/fuzz/fuzz_decoder.cpp \
+//     vda5050_core/src/*.cpp -o fuzz_decoder
 //   ./fuzz_decoder -max_total_time=60 vda5050_core/test/data
 //
 // Properties checked on every input:
