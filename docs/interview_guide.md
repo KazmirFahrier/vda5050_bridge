@@ -19,8 +19,9 @@ as the rest; interviewers probe exactly there.
 > Nav2 and an MQTT broker.
 
 The whole thing builds in CI on ROS 2 Jazzy. One test runs the node against a
-real MQTT broker; another drives orders through the real Nav2 stack with a
-simulated robot, including pause, resume and cancel.
+real MQTT broker; another drives orders through the real Nav2 stack, including
+in Gazebo with a simulated lidar and AMCL: multi-leg orders, pause, resume,
+cancel, and a navigation failure with recovery.
 
 ## 2-minute version: add these three points
 
@@ -125,6 +126,14 @@ left a retained `ONLINE` on the broker, because the process exited without
 announcing `OFFLINE`. The lesson in each: the bug was found by a tool or a test
 at a boundary, not by reading the code.
 
+**Have you had a test that passed for the wrong reason?**
+Yes. The Nav2 test waited for the navigator to be "active" by searching the
+lifecycle state for that word, which also matches "inactive". It passed for
+several runs. I caught it when the Gazebo job claimed Nav2 was up four seconds
+after launch, which is not credible for a physics simulator. Since then the
+Gazebo mode asserts that the simulator, the lidar and the localiser are really
+running before it sends an order.
+
 **Fakes vs mocks?**
 A fake is a simple working stand-in whose state you inspect afterwards. A mock
 has expectations set up front. Fakes keep tests about outcomes, not about the
@@ -177,11 +186,12 @@ periodic rule testable with a fake clock (ADR-014).
 
 State these before you are asked.
 
-- It has never run with a physics simulator, on a robot, or against a real
-  fleet manager. The Nav2 test uses Nav2's loopback simulator (no sensors,
-  localisation or obstacles) and a script in place of master control.
-- Navigation failure is tested only for a goal Nav2 refuses outright; a path
-  blocked part-way is not.
+- It has never run on a physical robot or against a real fleet manager. A
+  script plays master control.
+- In simulation the obstacles are static. Nothing moves into the path, and
+  navigation failure is tested only for a goal Nav2 refuses outright.
+- The first leg after start-up is slow (about 46 s, with Nav2 progress
+  failures) and I have not diagnosed why.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

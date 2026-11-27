@@ -3,9 +3,9 @@
 ROS 2 lifecycle node that makes a Nav2 robot a VDA 5050 vehicle.
 
 **Status.** Builds on ROS 2 Jazzy without warnings. CI runs it against a real
-Mosquitto broker and against the real Nav2 stack with Nav2's loopback
-simulator as the robot. It has not been run with a physics simulator or on a
-physical robot.
+Mosquitto broker and against the real Nav2 stack, both with Nav2's loopback
+simulator and in Gazebo with a simulated lidar and AMCL. It has not been run on
+a physical robot.
 
 ## What it does
 
@@ -106,9 +106,9 @@ master control with `mosquitto_pub` and checks what the vehicle publishes:
 
 ## System test with real Nav2
 
-`test/nav2_simulation_test.sh` launches `nav2_bringup`'s loopback simulation
-(map server, planner, controller, behaviour-tree navigator and costmaps are the
-real ones; only the robot is simulated) on the TurtleBot3 world map, then:
+`test/nav2_simulation_test.sh` launches `nav2_bringup` on the TurtleBot3 world
+map (map server, planner, controller, behaviour-tree navigator and costmaps are
+the real ones), then:
 
 | Order | Checked |
 |---|---|
@@ -116,6 +116,18 @@ real ones; only the robot is simulated) on the TurtleBot3 world map, then:
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
 | ofail: A -> X, with X off the map | Nav2 fails the goal; state shows a `FATAL` `navigationError`, not driving, X still listed ahead; no retry. `cancelOrder` clears it; a fresh order from the robot's position completes and the error list is empty again |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
+| o4: current position -> D, a point between four pillars | Completes with no errors; reported position within tolerance of D |
+
+The same script runs in two modes:
+
+| Mode | Robot | Localisation | Obstacles |
+|---|---|---|---|
+| default (loopback) | Nav2 loopback simulator: velocity commands become motion directly | none needed | static map only |
+| `SIMULATOR=gazebo` | TurtleBot3 in Gazebo: physics, wheel odometry, simulated lidar | AMCL, from the lidar scans | walls and pillars sensed by the lidar |
+
+Before any order is sent in Gazebo mode, the script asserts that Gazebo is
+running, AMCL exists, a lidar scan carries real ranges (in CI: 360 of 360 beams,
+nearest obstacle about 0.48 m), and simulation time is advancing.
 
 In the recorded CI runs the robot stopped 0.22 to 0.24 m from each target node.
 That is Nav2's default goal tolerance (0.25 m), not an adapter error, but a
@@ -129,6 +141,6 @@ libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 
 - TLS for the MQTT connection
 - `diagnostic_msgs` output
-- Unit tests for the individual adapter classes, and a test of a path that
-  becomes blocked after the vehicle has started driving.
+- Unit tests for the individual adapter classes, and a test of an obstacle
+  that appears in the path after the vehicle has started driving.
 - `NavigateThroughPoses` for smoother motion across several released nodes

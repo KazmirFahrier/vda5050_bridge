@@ -5,7 +5,7 @@
 | Package | Automated tests | Where they run |
 |---|---|---|
 | `vda5050_core` | 96 unit tests, 1 end-to-end example | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | 1 integration test, 1 system test | GitHub Actions, ROS 2 Jazzy container. Integration: real Mosquitto broker, fake Nav2. System: real broker, real Nav2, simulated robot |
+| `vda5050_nav2_adapter` | 1 integration test, 1 system test run in 2 modes | GitHub Actions, ROS 2 Jazzy container. Integration: real Mosquitto broker, fake Nav2. System: real broker and real Nav2, once with the loopback simulator and once in Gazebo with lidar and AMCL |
 
 ## How to run
 
@@ -130,20 +130,19 @@ published without the last will firing.
 ## The Nav2 system test
 
 `vda5050_nav2_adapter/test/nav2_simulation_test.sh` replaces the fake action
-server with the real Nav2 stack, launched from `nav2_bringup` with the loopback
-simulator on the TurtleBot3 world map.
+server with the real Nav2 stack from `nav2_bringup`, on the TurtleBot3 world
+map. Real in both modes: the adapter, the broker, and Nav2's map server,
+planner, controller, behaviour-tree navigator and costmaps.
 
-- **Real:** the adapter, the broker, and Nav2's map server, planner,
-  controller, behaviour-tree navigator and costmaps.
-- **Simulated:** the robot. The loopback simulator turns Nav2's velocity
-  commands directly into motion. There are no sensors, no localisation error,
-  no obstacles and no physics.
+| Mode | What simulates the robot | What that adds |
+|---|---|---|
+| loopback (default) | Nav2's loopback simulator turns velocity commands directly into motion | Nothing: no sensors, localisation error, obstacles or physics. Fast and deterministic |
+| `SIMULATOR=gazebo` | A TurtleBot3 in the Gazebo physics simulator | Wheel odometry, a simulated lidar, AMCL localising from the scans, and walls and pillars the lidar really sees |
 
-Four scenarios along a free strip of the map:
+Five scenarios:
 
 1. **A -> B -> C.** Both legs are driven; the test checks the intermediate
-   state at B, completion at C with no errors, and that the reported position
-   is within 0.4 m of C.
+   state at B, completion at C with no errors, and the reported position.
 2. **C -> A with pause and resume.** While driving, `startPause`: state shows
    paused and not driving, and the leg does not complete during three seconds.
    After `stopPause` the order completes at A with no errors.
@@ -151,19 +150,35 @@ Four scenarios along a free strip of the map:
    `FATAL` `navigationError`, that the vehicle is not driving, still lists X
    ahead and does not retry; that `cancelOrder` clears the order; and that a
    fresh order from the robot's reported position then completes with an empty
-   error list. In CI the failure arrived within about 0.2 s, so this is Nav2
+   error list. The failure arrives within about 0.2 s, so this is Nav2
    refusing an impossible goal, not giving up after trying.
 4. **A -> C, cancelled.** While driving, `cancelOrder`: the cancel action
    reaches `FINISHED`, the vehicle is stopped, the route is cleared, no error is
    raised and C is not reached.
+5. **To D, a point in the middle of four pillars.** About 2.5 m, passing
+   between two pillars. Completes with no errors.
 
-One thing the first run showed: the test passed but the CI step failed, because
-the script's cleanup killed every process with "nav2" in its command line,
-which included the script itself. A green log with a red job is worth reading
-to the end.
+### Proving the Gazebo run is real
 
-Observed stopping distance from the target node was 0.22 to 0.24 m, which is
-Nav2's default goal tolerance.
+A simulation test can pass for the wrong reason, so in Gazebo mode the script
+asserts, before sending any order:
+
+- the `gz sim` process exists and the `/amcl` node exists
+- one message on `/scan` contains real ranges (in CI: 360 of 360 beams finite,
+  nearest obstacle about 0.48 m, which matches a pillar next to the start)
+- simulation time on `/clock` advances
+
+At the end it prints AMCL's own pose estimate and a summary of errors in the
+Nav2 log.
+
+### What these runs found
+
+| Finding | Detail |
+|---|---|
+| The readiness check was wrong | It looked for the word `active` in the lifecycle state, which also matches `inactive`. The test moved on before Nav2 was up and still passed, because later steps happened to wait long enough. Found only because a Gazebo start-up of four seconds was not believable. Now anchored |
+| Cleanup killed the test itself | `pkill -f nav2` matched the script's own name: every check passed and the CI step went red |
+| Stopping distance | The robot stops 0.19 to 0.24 m from the target node. That is Nav2's default goal tolerance (0.25 m). A deployment must set it tighter than the fleet manager's `allowedDeviationXY` |
+| Slow first leg (open) | The first 0.5 m leg after start-up takes about 46 s in both modes; Nav2's controller logs "Failed to make progress" four times. The second 0.5 m leg takes about 4 s and the 2.5 m leg about 6 s. Not yet diagnosed; it may be Nav2 tuning or the goal orientation the adapter sends for the first leg |
 
 ## What the first real build found
 
@@ -184,7 +199,8 @@ problems, none of which the earlier stand-in-header syntax check could have:
 | Standalone CMake, Clang, same flags | 96/96 pass, example passes |
 | colcon on `ros:jazzy`, both packages | builds with no warnings; 96/96 pass |
 | Integration test on `ros:jazzy` | passes |
-| Nav2 system test on `ros:jazzy` | passes |
+| Nav2 system test on `ros:jazzy`, loopback simulator | passes |
+| Nav2 system test on `ros:jazzy`, Gazebo with software rendering under Xvfb | passes |
 
 The core was additionally built locally in Release with
 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror`.
@@ -193,11 +209,12 @@ The core was additionally built locally in Release with
 
 Read this before claiming more than is true.
 
-- **A path blocked part-way.** The failure test uses a goal Nav2 refuses
-  immediately. Failure after the vehicle has started moving, with Nav2's
-  recovery behaviours running first, is not exercised.
-- **A physics simulator or physical robot.** The Nav2 test uses the loopback
-  simulator: no sensors, localisation, obstacles or dynamics.
+- **An obstacle appearing in the path.** The Gazebo world's obstacles are
+  static. Failure after the vehicle has started moving, with Nav2's recovery
+  behaviours running first, is not exercised.
+- **A physical robot.**
+- **Repeatability of the Gazebo job.** It has passed in each CI run so far, a
+  small sample. Physics simulation on shared CI machines can be flaky.
 - **A real fleet manager.** Master control is a shell script.
 - **The launch file** has not been executed; the test starts the binary directly.
 - **Reconnect behaviour** after a broker outage (implemented in the core and
@@ -215,7 +232,6 @@ Read this before claiming more than is true.
 | Layer | Tooling |
 |---|---|
 | Schema conformance: validate encoded messages against the official JSON schemas | Python `jsonschema` in CI |
-| A path that becomes blocked while driving | needs a simulator with obstacles |
+| An obstacle spawned in the path while driving | Gazebo entity spawn from the test script |
 | Lifecycle transitions driven externally, via the launch file | `launch_testing` |
-| Bring-up with a physics simulator (sensors, localisation) | Nav2 TurtleBot bring-up with Gazebo |
 | Fuzzing the decoder | libFuzzer |

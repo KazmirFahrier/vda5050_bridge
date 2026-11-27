@@ -15,17 +15,20 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 | Package | What it is | Verification |
 |---|---|---|
 | `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 96 unit tests and one end-to-end example. Pass in CI with GCC and Clang under AddressSanitizer/UBSan, and under colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Two tests in CI: an integration test (real Mosquitto broker, fake Nav2) and a system test that drives orders through the **real Nav2 stack** with a simulated robot, including pause/resume, cancel, and a navigation failure with recovery |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Three tests in CI: an integration test (real Mosquitto broker, fake Nav2), and a system test that drives orders through the **real Nav2 stack** twice: with Nav2's loopback simulator, and in **Gazebo** with a simulated lidar and AMCL localisation |
 
 What has **not** been done:
 
-- No physics simulator or physical robot. In the Nav2 system test the robot is
-  Nav2's loopback simulator: velocity commands become motion directly, with no
-  sensors, localisation error or obstacles.
+- No physical robot.
 - No run against a real fleet manager. Master control is played by a script.
-- Navigation failure is tested only for a goal Nav2 refuses at once (a node
-  off the map). A path that becomes blocked part-way, and broker outages, are
-  implemented but not exercised against real components.
+- No obstacle that appears while the robot is driving. The Gazebo world's
+  walls and pillars are sensed by the lidar and planned around, but nothing
+  moves into the path. Navigation failure is tested only for a goal Nav2
+  refuses at once (a node off the map).
+- Broker outages are implemented but not exercised against a real broker.
+- One open observation: the first leg after start-up takes about 46 s in both
+  simulators, with Nav2's controller reporting "Failed to make progress" four
+  times before it completes. Later legs take seconds. Not yet diagnosed.
 - No automated validation against the official JSON schemas; field names were
   checked by reading the published v2.0 schemas.
 - The launch file has not been executed (tests start the executable directly).
@@ -38,7 +41,7 @@ Details: [docs/testing.md](docs/testing.md).
 vda5050_bridge/
 ├── README.md
 ├── LICENSE                         Apache-2.0
-├── .github/workflows/ci.yml        CI: standalone x2 compilers, colcon, integration test, Nav2 system test
+├── .github/workflows/ci.yml        CI: standalone x2 compilers, colcon, integration test, Nav2 system test (loopback and Gazebo)
 ├── docs/
 │   ├── vda5050_primer.md           The protocol, explained from scratch
 │   ├── architecture.md             How the code is structured and why
@@ -121,7 +124,11 @@ also needs `ros-jazzy-navigation2`, `ros-jazzy-nav2-bringup` and
 ```bash
 bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
 bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
+SIMULATOR=gazebo bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
 ```
+
+The Gazebo mode also needs `ros-jazzy-nav2-minimal-tb3-sim` and, on a machine
+without a display, `xvfb`.
 
 ## Where to start reading
 
