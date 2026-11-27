@@ -16,7 +16,7 @@
   `allowedDeviationXY`
 - Tune the controller and collision monitor for narrow passages and for
   obstacles that appear close ahead: with the defaults Nav2 stalled in the
-  pillar gap once, gave up on a partly blocked strip in two runs out of four,
+  pillar gap once, gave up on a partly blocked strip in two runs out of five,
   and in one run brushed a box that was dropped half a metre in front of the
   moving robot
 

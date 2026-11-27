@@ -120,7 +120,7 @@ the real ones), then:
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
 | ofail: A -> X, with X off the map | Nav2 fails the goal; state shows a `FATAL` `navigationError`, not driving, X still listed ahead; no retry. `cancelOrder` clears it; a fresh order from the robot's position completes and the error list is empty again |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
-| oblock (Gazebo only): A -> C with an unmapped 0.3 m box on the line | Either the order completes with the robot at C, or Nav2 gives up and the vehicle halts with a `FATAL` `navigationError` that `cancelOrder` then clears. Over four CI runs each happened twice |
+| oblock (Gazebo only): A -> C with an unmapped 0.3 m box on the line | Either the order completes with the robot at C, or Nav2 gives up and the vehicle halts with a `FATAL` `navigationError` that `cancelOrder` then clears. In the first five CI runs Nav2 gave up twice and got round the box three times |
 | o4: back to A, then to D, a point between four pillars | Completes with no errors; reported position within tolerance of D; time and Nav2 controller stalls are printed |
 
 The same script runs in two modes:
