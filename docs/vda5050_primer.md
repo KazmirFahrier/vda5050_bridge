@@ -44,8 +44,9 @@ uagv/v2/acme/amr-001/order
 Code: `topic_name()` in `header.hpp`; `Session` in `session.hpp` decides what is sent on each.
 
 Quality of service: every topic uses MQTT QoS 0 except `connection`, which is
-QoS 1 and retained, so a master that connects later still learns each
-vehicle's last connection state.
+QoS 1. `connection` and `factsheet` are published retained, so a master that
+connects later still learns each vehicle's last connection state and its
+capabilities.
 
 Every message begins with the same header: `headerId` (a counter kept
 separately for each topic), `timestamp` (ISO 8601 UTC), `version`,
@@ -206,7 +207,16 @@ side is `MosquittoTransport` in the adapter package.
   with v2. Supporting it would mean a second codec; the state machine is
   version-neutral by design. See the roadmap.
 
-One naming wrinkle found while checking field names: the specification text
-writes `allowedDeviationXY`, while a published v2.0 JSON schema spells it
-`allowedDeviationXy`. The decoder accepts both and the encoder writes the
-specification spelling. Code: `decode_node_position()` in `codec.cpp`.
+### Where the official sources disagree
+
+Validating against the official JSON schemas (see `testing.md`) turned up
+places where the schemas and the specification text differ. The library is
+tolerant on input and follows the text on output.
+
+| Topic | Specification text | Official schema | This library |
+|---|---|---|---|
+| Instant action type | `actionType` | 2.0.0: `actionName`; 2.1.0: `actionType` | Accepts both |
+| Action status `PAUSED` | Defined | Missing from the enum in 2.0.0 and 2.1.0 | Emits `PAUSED` (ADR-019) |
+| `allowedDeviationXY` | That spelling | 2.0.0: `allowedDeviationXy`; 2.1.0: `allowedDeviationXY` | Accepts both, writes the spelling from the text |
+
+Code: `decode_action()` and `decode_node_position()` in `codec.cpp`.

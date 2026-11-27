@@ -4,9 +4,9 @@
 
 | Area | State |
 |---|---|
-| `vda5050_core` | Implemented; 96 unit tests pass in CI |
+| `vda5050_core` | Implemented; 109 unit tests, 98.8 % line coverage, schema-conformant |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
-| CI | Green: two standalone jobs, colcon build and test, integration test, Nav2 system test in two simulators |
+| CI | Seven jobs: two standalone builds, colcon build with tests and linters, integration test, schema conformance, coverage, Nav2 in two simulators |
 
 ## Next steps, in order
 
@@ -14,28 +14,28 @@
 - Ship a recommended Nav2 parameter file, with a goal tolerance tighter than
   the default 0.25 m so the vehicle stops within the fleet manager's
   `allowedDeviationXY`
-- Tune the controller for turning on the spot and for narrow gaps: with the
-  default parameters it stalled once in the pillar gap before recovering
+- Tune the controller and collision monitor for narrow passages and for
+  obstacles that appear close ahead: with the defaults Nav2 stalled in the
+  pillar gap once, gave up on a blocked strip, and in one run brushed a box
+  that was dropped half a metre in front of the moving robot
 
-### 2. Harder scenarios
-- An obstacle spawned in the path while driving: expect Nav2 recoveries, then
-  either success or `navigationError`
-- Broker restart during an order
-- Longer multi-node orders with order updates extending the base
+### 2. A real counterpart
+- Run against a real fleet manager (for example Open-RMF's VDA 5050 support or
+  a vendor's test instance)
+- Run on a physical robot
 
-### 3. Verification infrastructure
-- `ament_lint_auto` (cpplint, uncrustify, xmllint)
-- Schema conformance tests against the official VDA 5050 JSON schemas
-- `launch_testing` for the adapter: lifecycle transitions, a fake
-  `NavigateToPose` server, a real broker
-- Coverage report; fuzz target for the decoder
+### 3. Tests for the adapter's classes
+- Unit tests with a mocked action server for `Nav2NavigationAdapter`
+- Coverage measurement for the adapter package
 
 ### 4. Protocol completeness
+- Decide the `PAUSED` action status question once the official schemas and the
+  specification text agree
 - `loads`, `information`, `distanceSinceLastNode`, `trajectory`
 - v2.1 additions (for example `maps`)
 - Standard actions with defined behaviour: `initPosition`, `startCharging`,
   `stopCharging`, `logReport`
-- Factsheet geometry and load specification
+- Factsheet geometry and load specification (currently present but empty)
 
 ### Later
 - VDA 5050 v3.0 codec alongside v2 (the state machine is wire-format neutral)
@@ -57,7 +57,6 @@ Behavioural simplifications in the core, all deliberate and all testable to chan
 | Stitching node actions | Actions listed on an update's first node are ignored | Should match what the vehicle already has |
 | `allowedDeviationTheta` | Parsed, not used for the first-node check | Orientation should be checked too |
 | Factsheet request without a configured factsheet | The instant action reports `FINISHED` but nothing is published | Should fail |
-| Factsheet retain flag | Published non-retained | Not confirmed against the specification |
 
 Limitations of the adapter design:
 

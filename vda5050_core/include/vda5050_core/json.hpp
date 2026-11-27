@@ -54,26 +54,35 @@ public:
   /// Default nesting limit for `parse`. Real VDA 5050 messages nest < 10 levels.
   static constexpr std::size_t kDefaultMaxDepth = 64;
 
+  // The converting constructors are implicit on purpose, so that building a
+  // message reads as `json["key"] = value`. Hence the NOLINT markers.
   Json() = default;  // null
-  Json(std::nullptr_t) {}  // NOLINT(runtime/explicit)
+  // NOLINTNEXTLINE(runtime/explicit)
+  Json(std::nullptr_t) {}
+  // NOLINTNEXTLINE(runtime/explicit)
   Json(bool value)
-  : value_(value) {}                   // NOLINT(runtime/explicit)
+  : value_(value) {}
+  // NOLINTNEXTLINE(runtime/explicit)
   Json(const char * value)
-  : value_(std::string(value)) {}                           // NOLINT(runtime/explicit)
+  : value_(std::string(value)) {}
+  // NOLINTNEXTLINE(runtime/explicit)
   Json(std::string value)
-  : value_(std::move(value)) {}                          // NOLINT(runtime/explicit)
+  : value_(std::move(value)) {}
+  // NOLINTNEXTLINE(runtime/explicit)
   Json(Array value)
-  : value_(std::move(value)) {}                    // NOLINT(runtime/explicit)
+  : value_(std::move(value)) {}
+  // NOLINTNEXTLINE(runtime/explicit)
   Json(Object value)
-  : value_(std::move(value)) {}                     // NOLINT(runtime/explicit)
+  : value_(std::move(value)) {}
 
   /// Any arithmetic type except bool becomes a JSON number (stored as double,
   /// which represents every integer up to 2^53 exactly: enough for uint32 ids).
+  // NOLINTNEXTLINE(runtime/explicit)
   template<
     typename T,
     typename = std::enable_if_t<std::is_arithmetic_v<T>&& !std::is_same_v<T, bool>>>
-  Json(T value)
-  : value_(static_cast<double>(value)) {}                // NOLINT(runtime/explicit)
+  Json(T value)  // NOLINT(runtime/explicit)
+  : value_(static_cast<double>(value)) {}
 
   bool is_null() const noexcept {return std::holds_alternative<std::nullptr_t>(value_);}
   bool is_bool() const noexcept {return std::holds_alternative<bool>(value_);}
