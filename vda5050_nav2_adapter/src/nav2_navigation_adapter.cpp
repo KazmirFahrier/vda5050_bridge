@@ -58,6 +58,10 @@ void Nav2NavigationAdapter::send_goal()
   goal.pose.pose.orientation.z = std::sin(yaw / 2.0);
   goal.pose.pose.orientation.w = std::cos(yaw / 2.0);
 
+  RCLCPP_INFO(
+    node_.get_logger(), "navigating to node '%s' at (%.2f, %.2f), heading %.2f rad",
+    target_->node_id.c_str(), position.x, position.y, yaw);
+
   const std::uint64_t generation = ++generation_;
   rclcpp_action::Client<NavigateToPose>::SendGoalOptions options;
   options.goal_response_callback =
