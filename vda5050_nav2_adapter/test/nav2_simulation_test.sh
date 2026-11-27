@@ -23,8 +23,8 @@
 #      cancelOrder, then order orecover from where the robot
 #        now stands back to A                                 must complete
 #   4. order o3: A -> C, cancelled while driving              must stop cleanly
-#   5. (Gazebo only) order oblock: A -> C, and a box is dropped
-#        into the path once the robot is moving. The box is not
+#   5. (Gazebo only) order oblock: A -> C, with a box placed in
+#        the path just before the order is sent. The box is not
 #        on the map; only the lidar can see it.                either Nav2 gets
 #        round it and the order completes, or Nav2 gives up and
 #        the vehicle reports a navigationError. Both are valid;
@@ -317,20 +317,21 @@ return_to_a() {  # return_to_a <orderId>
 }
 
 if [ "$SIMULATOR" = "gazebo" ]; then
-  echo "== 5. order oblock: A -> C with a box dropped into the path =="
+  echo "== 5. order oblock: A -> C with an unmapped box in the path =="
   BOX_X=-2.0; BOX_Y=0.05
   return_to_a oreturn1
   WORLD="$(gz topic -l 2>/dev/null | grep -o '^/world/[^/]*' | head -n 1 | cut -d/ -f3)"
   [ -n "$WORLD" ] || fail "could not determine the Gazebo world name"
+  ros2 run ros_gz_sim create -world "$WORLD" -name obstacle_box -x "$BOX_X" -y "$BOX_Y" -z 0.15 -string \
+    '<sdf version="1.8"><model name="obstacle_box"><static>true</static><link name="link"><collision name="c"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></collision><visual name="v"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></visual></link></model></sdf>' \
+    >/dev/null 2>&1 || fail "could not spawn the obstacle in Gazebo world '${WORLD}'"
+  echo "   box (0.3 m cube) placed at (${BOX_X}, ${BOX_Y}) in world '${WORLD}', on the straight line from A to C"
+  sleep 3   # let the lidar pick it up before the order arrives
   VIS_MARK=$(wc -l <"$LOG")
   STALLS_BEFORE=$(grep -c "Failed to make progress" "$NAV2_LOG")
   BLOCK_T0=$(date +%s)
   send order "{${HEADER},\"orderId\":\"oblock\",\"orderUpdateId\":0,\"nodes\":[$(node A 0 $AX $AY),$(node C 2 $CX $CY)],\"edges\":[$(edge AC 1 A C)]}"
   wait_for "vehicle driving" 15 "^${PREFIX}/state .*\"driving\":true.*\"orderId\":\"oblock\""
-  ros2 run ros_gz_sim create -world "$WORLD" -name obstacle_box -x "$BOX_X" -y "$BOX_Y" -z 0.15 -string \
-    '<sdf version="1.8"><model name="obstacle_box"><static>true</static><link name="link"><collision name="c"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></collision><visual name="v"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></visual></link></model></sdf>' \
-    >/dev/null 2>&1 || fail "could not spawn the obstacle in Gazebo world '${WORLD}'"
-  echo "   box (0.3 m cube) spawned at (${BOX_X}, ${BOX_Y}) in world '${WORLD}', between the robot and C"
 
   DONE="^${PREFIX}/state .*\"driving\":false.*\"errors\":\[\].*\"lastNodeId\":\"C\".*\"nodeStates\":\[\].*\"orderId\":\"oblock\""
   GAVE_UP="^${PREFIX}/state .*\"driving\":false.*\"errorLevel\":\"FATAL\".*\"errorType\":\"navigationError\".*\"orderId\":\"oblock\""

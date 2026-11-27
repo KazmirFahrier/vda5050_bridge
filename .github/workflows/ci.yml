@@ -74,11 +74,9 @@ jobs:
           ament_xmllint . > /tmp/lint/xmllint.txt 2>&1 || true
           ament_lint_cmake . > /tmp/lint/lint_cmake.txt 2>&1 || true
           wc -l /tmp/lint/*
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lint-report
-          path: /tmp/lint
+          echo "LINT-ARCHIVE-BEGIN"
+          tar czf - -C /tmp lint | base64 -w 120
+          echo "LINT-ARCHIVE-END"
       - name: Integration test (real broker, fake Nav2)
         shell: bash
         run: |
@@ -186,6 +184,7 @@ jobs:
         run: ./build/vda5050_core_tests
       - name: Report (fails below 95 % line coverage)
         run: >
-          gcovr --root . --filter 'vda5050_core/src/' --object-directory build
+          gcovr --root . --filter 'vda5050_core/src/'
           --print-summary --fail-under-line 95
+          build/CMakeFiles/vda5050_core.dir
 

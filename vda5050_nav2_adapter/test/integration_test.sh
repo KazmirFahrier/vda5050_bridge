@@ -155,7 +155,11 @@ wait_for_new "progress made offline is reported: o2 finished at N2, no errors" 1
 
 echo "== clean shutdown (SIGINT) =="
 mark
-kill -INT "$ADAPTER_PID"
+# Signal the node itself, as Ctrl-C in its terminal would. (A background
+# `ros2 launch` in a non-interactive shell does not react to SIGINT.)
+NODE_PID="$(pgrep -f "lib/vda5050_nav2_adapter/vda5050_adapter" | head -n 1)"
+[ -n "$NODE_PID" ] || fail "adapter process not found"
+kill -INT "$NODE_PID"
 wait_for_new "vehicle announces OFFLINE before leaving" 10 \
   "^${PREFIX}/connection .*\"connectionState\":\"OFFLINE\""
 sleep 2
