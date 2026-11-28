@@ -357,7 +357,7 @@ void AdapterNode::apply_faults()
   }
   session_->orders().set_external_errors(std::move(errors));
   if (hold_on_fatal_fault_) {
-    session_->orders().set_hold(fatal);
+    session_->orders().set_hold(false);
   }
 }
 
