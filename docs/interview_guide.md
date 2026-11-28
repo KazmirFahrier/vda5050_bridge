@@ -15,7 +15,7 @@ as the rest; interviewers probe exactly there.
 > no ROS dependency: it decodes orders, validates them, runs a state machine
 > that walks the route node by node, schedules actions by their blocking type,
 > handles cancel and pause, and decides what goes out over MQTT and when. It has
-> 115 unit tests that run in milliseconds, with 98.8 % line coverage, and its
+> 123 unit tests that run in milliseconds, with 98.8 % line coverage, and its
 > messages validate against the official VDA 5050 JSON schemas. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
@@ -304,16 +304,157 @@ All of it runs in CI in one end-to-end test with a real broker: reports,
 debounce, latching, the hold during an order, acknowledge over HTTP, the bag,
 restarts. None of it has run on a physical robot.
 
+## Questions about fleet traffic control
+
+The repository also has the other side of the protocol: a fleet manager.
+Full text: [fleet_management.md](fleet_management.md). This is the part with
+the most algorithmic content, so expect the deepest questions here.
+
+**30 seconds.**
+
+> Then I built the other side: a fleet manager for several vehicles on one
+> roadmap. It plans timed routes for all of them and hands them out a few
+> edges at a time as VDA 5050 orders. Safety and progress are separate
+> mechanisms. A vehicle is only given an edge if nothing it needs conflicts
+> with what another vehicle holds; that rule alone prevents collisions,
+> whatever the planner does. And edges are given in the order of a plan, which
+> prevents deadlock. I test it by running the real vehicle state machines
+> against it over a lossy simulated network, with monitors, over tens of
+> thousands of random scenarios with injected faults.
+
+**How do you guarantee two vehicles never collide?**
+Every node and edge is a resource. A table computed from the geometry says
+which pairs are too close for two vehicles. A vehicle holds the node it
+stands on; to drive an edge it must first hold the edge and the node at its
+end, and it keeps the node it leaves until it has arrived. A move is granted
+only if what it needs conflicts with nothing anybody else holds
+(`FleetManager::grant_and_send()`). No time and no plan are involved, so a
+slow vehicle or a wrong plan cannot break it. The assumption is that each
+vehicle is physically within what it holds.
+
+**Why a conflict table and not just "same node"?**
+Because the two directions of an aisle are two edges, an edge can pass close
+to a node it does not touch, and edges can cross. All of these are conflicts
+between different resources (ADR-029).
+
+**What is a deadlock here and how do you prevent it?**
+Vehicles waiting for each other in a cycle: two head-on in an aisle, or
+four around a block. The claims rule alone allows that. So moves are granted
+in the order of a plan: a move waits until every conflicting use that the
+plan has earlier is done. In a valid plan those uses do not overlap in time,
+so "earlier" is an order without cycles, and a cycle of waiting needs a
+cycle. The plan's times only order things; nobody has to be on time
+(`grantable()`).
+
+**So can it never get stuck?**
+It cannot deadlock on a valid plan. It can fail to find a plan: the planner
+is not complete. Then it moves vehicles one step at a time and replans. And
+a task whose stop is permanently occupied waits for ever. I say "no deadlock
+under a valid plan", not "always finishes".
+
+**How does the planner work?**
+Three stages, each only if the one before left someone without a route.
+First one vehicle after another by priority, each planning around the
+others with safe-interval path planning, trying several orderings. Second a
+conflict-based search with a budget, for cases where each of two vehicles
+must give way to the other somewhere. Third, one step for everybody who is
+still stuck. Then every plan goes through a separate check before use.
+
+**What is safe-interval path planning?**
+Planning in space and time, but grouping time: a node is free during a few
+intervals between other vehicles' reservations, and the search state is
+(node, interval) with the earliest arrival, not (node, time). Far fewer
+states, same result.
+
+**Why not just use conflict-based search for everything? It is complete.**
+Its running time grows exponentially with the number of conflicts, which is
+largest exactly when the floor is crowded. The fleet manager replans many
+times a minute and most replans are trivial. So: cheap method first, search
+with a budget second (ADR-031). I give up optimality and completeness for a
+bounded answer time.
+
+**What is base and horizon and how do you use it?**
+The released and the announced part of a VDA 5050 order. I release three
+edges ahead and announce three more. When the vehicle passes a node I send
+an update with the same `orderId` and the next `orderUpdateId`, starting at
+the last released node. Why three: a release cannot be taken back, so
+everything released is closed to the others; one edge would make vehicles
+stop at every node (ADR-030).
+
+**A message gets lost. What happens?**
+QoS 0, so it happens. An order counts as delivered when the vehicle's state
+shows its ids. Until then it is sent again every two seconds and nothing new
+is granted to that vehicle. A lost state costs nothing; the next one has the
+same content.
+
+**A vehicle fails or goes offline in the middle of an aisle?**
+It keeps everything it was granted, because it may be anywhere in there. It
+is planned around. For failures there is one procedure whatever the cause
+(ADR-032): cancel the order, wait until the vehicle stands, find out where
+it is. If it stands on an edge it keeps the edge and both ends and gets an
+order to the end of the edge whose first node allows for the distance
+already driven.
+
+**What was the hardest bug?**
+A task was cancelled in the instant its first order had been sent. The
+vehicle's last state still said "idle", so the fleet manager considered it
+stopped and freed its reservations. A moment later the order arrived and
+the vehicle drove off with nothing reserved. A cancellation would not have
+helped: it could overtake the order and find nothing to cancel. The fix is
+to see the order through, sending it until the vehicle has it, and cancel
+then. No hand-written test had it; a random scenario with a claims monitor
+did. It is now `AnOrderOnItsWayToAVehicleThatIsToBeStoppedIsSeenThrough`.
+
+**How do you test something like this?**
+Three layers. Unit tests for the geometry and the planner stages. A
+simulated fleet in which the fleet manager talks to real instances of the
+vehicle-side state machine through queues that delay and lose messages;
+only motion is simulated, and time is a variable, so a minute takes a
+millisecond. And monitors that check distance, claims and presence after
+every step without using the fleet manager's logic. On top, seeded random
+scenarios with injected faults: 20,000 without faults and 20,000 with, no
+violation and no task left hanging. And one system test with the real
+program, a real broker and separate vehicle processes.
+
+**What does that prove?**
+That the properties held in those scenarios: small maps, up to six
+vehicles, point-shaped vehicles. Not that they always hold. For the claims
+rule there is an argument independent of the tests. For liveness of the
+whole system there is not.
+
+**What is its biggest weakness?**
+A vehicle that is online but cannot be placed. It holds nothing, and after
+ten seconds the fleet works past it (ADR-033). Second: it has never driven
+a real robot, not even the Nav2 adapter next to it in the repository. Third:
+no memory across a restart.
+
+**Is this a safety system?**
+No. It is traffic control in software, based on positions the vehicles
+report. Each vehicle needs its own certified obstacle detection.
+
+**How does this compare to Open-RMF or a commercial fleet manager?**
+Much smaller. Open-RMF handles several fleets from different vendors with
+its own traffic negotiation, doors, lifts and task bidding. This is one
+fleet on one roadmap, with the mechanism (reservation plus plan order)
+visible in a few hundred lines. I would use it to explain how such systems
+work, not to replace one.
+
 ## Be honest about
 
 State these before you are asked.
 
 - It has never run on a physical robot or against a real fleet manager. A
   script plays master control.
+- The fleet manager has only ever met this repository's own vehicle side,
+  with a point for a robot. It has not driven the Nav2 adapter. It is not a
+  safety function, forgets queued tasks on restart, assumes one vehicle size
+  and straight edges, and its planner can miss routes that exist. Its
+  first-stage heuristics grew from failing cases and are the least principled
+  code in the repository.
 - Fault management has only three built-in monitors, all about the bridge
   itself. Holding the vehicle on a critical fault is not a safety function.
   The web API has one optional shared token and no TLS.
-- Coverage is measured for the two libraries only; the adapter, the fault
+- Coverage is measured for the three libraries only; the adapter, the fault
   manager node and the gateway's ROS code have end-to-end tests but no unit
   tests.
 - With default Nav2 parameters the robot stops up to 0.24 m from a node and
@@ -336,7 +477,13 @@ Each is small and forces you through the important code.
 1. Add the `distanceSinceLastNode` state field: type, snapshot, encoder, test.
 2. Make a failed HARD action halt the order (change ADR-008), with a config flag.
 3. Add `validate_order` rule: `nodePosition.theta` must be within [-pi, pi].
-4. Implement `encode_order()` and a decode/encode round-trip test.
+4. Add `decode_factsheet()` for the master control side, with a round-trip
+   test like those in `test_codec_master.cpp`.
 5. Read `PortsMayReportResultsSynchronously`, then remove the re-entrancy guard
    in `advance()` and the copies in `advance_once()` one at a time, and explain
    what breaks under AddressSanitizer and why.
+6. In `fleet_core`: set `release_ahead` to 1 and then to 10, run
+   `FleetSim` and the soak tests, and explain what changes and why.
+7. Remove the order rule from `grantable()` (return true) and find the
+   smallest test that now hangs. Then remove the claims check instead and see
+   which monitor fires first.

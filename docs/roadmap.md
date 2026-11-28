@@ -4,11 +4,13 @@
 
 | Area | State |
 |---|---|
-| `vda5050_core` | Implemented; 115 unit tests, 98.8 % line coverage, schema-conformant |
+| `vda5050_core` | Implemented; 123 unit tests, 98.8 % line coverage, schema-conformant |
 | `fault_core` | Implemented; 54 unit tests |
+| `fleet_core` | Implemented; 91 unit tests, 97 % line coverage |
+| `vda5050_fleet` | Implemented; system test with a real broker and four vehicle processes passes in CI |
 | `fault_msgs`, `fault_manager`, `fault_gateway` | Implemented; 37 unit tests for the gateway; one end-to-end test of all fault nodes passes in CI |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
-| CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test and the fault system test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
+| CI | Nine jobs: two standalone builds, colcon build with tests and linters plus the integration test and the fault system test, schema conformance, coverage, fuzzing, Nav2 in two simulators, the fleet system test |
 
 ## Fault management
 
@@ -31,6 +33,28 @@ Possible next steps here:
 - TLS, user accounts and an audit trail for the web API
 - Unit tests for the ROS code of `fault_manager` and `fault_gateway`
 - Make the fault manager a lifecycle node
+
+## Fleet traffic control
+
+Implemented: roadmap, conflict table, planner in three stages, fleet manager
+with recovery, command interface, the program and a simulated vehicle. See
+[fleet_management.md](fleet_management.md), in particular its limits.
+
+Possible next steps, most valuable first:
+
+- Run the fleet manager with vehicles that use `vda5050_nav2_adapter` and
+  Nav2 (several robots in one Gazebo world). This is the missing link between
+  the two halves of this repository
+- Keep tasks and the last known state across a restart
+- Handle a vehicle that is online but cannot be placed better than by waiting
+  ten seconds: for example, keep its last known surroundings closed
+- Vehicles of different sizes; curved edges; orientation at nodes
+- Detect tasks that can never finish, and report them
+- Charging, parking when idle, and assignment that looks further ahead than
+  the nearest free vehicle
+- A display: the state topic has everything a live map needs
+- Measure and bound planning time on large roadmaps
+- A second fleet manager on standby
 
 ## Next steps for the bridge, in order
 

@@ -155,6 +155,25 @@ jobs:
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
 
+  fleet-system:
+    name: Fleet manager with four vehicle processes and a real broker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          ninja-build libmosquitto-dev mosquitto mosquitto-clients
+      - name: Build the fleet manager and the simulated vehicle
+        run: |
+          cmake -S vda5050_fleet -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Werror
+          cmake --build build
+      - name: Run tasks through the fleet (cancel one, kill a vehicle, bring it back)
+        run: >
+          python3 vda5050_fleet/test/fleet_system_test.py build
+          vda5050_fleet/config/demo_roadmap.json
+
   schema-conformance:
     name: Official VDA 5050 JSON schemas (2.0.0 and 2.1.0)
     runs-on: ubuntu-24.04

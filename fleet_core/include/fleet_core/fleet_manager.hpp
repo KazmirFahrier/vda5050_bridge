@@ -89,6 +89,10 @@ struct FleetConfig
   /// After this many navigation failures in a row a vehicle is taken out of
   /// service until reset_vehicle() is called.
   int max_navigation_failures{3};
+  /// How many tasks that are over (finished, failed, cancelled) are kept for
+  /// display. Older ones are forgotten, so that a fleet manager that runs for
+  /// months does not grow.
+  std::size_t finished_tasks_kept{200};
   /// Seconds assumed for the actions at a stop that gives no estimate.
   double default_dwell{5.0};
 };

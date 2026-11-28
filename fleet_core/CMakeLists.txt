@@ -36,6 +36,7 @@ if(NOT vda5050_core_FOUND)
 endif()
 
 add_library(${PROJECT_NAME}
+  src/api.cpp
   src/conflicts.cpp
   src/fleet_manager.cpp
   src/planner.cpp
@@ -63,6 +64,7 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
   set(TEST_SOURCES
+    test/test_api.cpp
     test/test_roadmap.cpp
     test/test_planner.cpp
     test/test_fleet_sim.cpp

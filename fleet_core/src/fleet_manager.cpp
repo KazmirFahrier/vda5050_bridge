@@ -1371,6 +1371,20 @@ void FleetManager::send_order(Vehicle & vehicle, TimePoint now)
 
 void FleetManager::tick(TimePoint now)
 {
+  // Forget the oldest tasks that are over. Done here and nowhere else, so
+  // that nothing holds on to a task while it is removed.
+  std::size_t over = 0;
+  for (const Task & task : tasks_) {
+    over += (task.state != TaskState::Queued && task.state != TaskState::Assigned) ? 1 : 0;
+  }
+  for (auto it = tasks_.begin(); over > config_.finished_tasks_kept && it != tasks_.end(); ) {
+    if (it->state != TaskState::Queued && it->state != TaskState::Assigned) {
+      it = tasks_.erase(it);
+      --over;
+    } else {
+      ++it;
+    }
+  }
   for (const std::unique_ptr<Vehicle> & vehicle : vehicles_) {
     if (vehicle->pending && vehicle->online &&
       now - vehicle->pending->sent_at >= config_.order_resend)

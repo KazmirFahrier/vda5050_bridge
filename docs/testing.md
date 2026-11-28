@@ -4,12 +4,14 @@
 
 | What | Result | Where it runs |
 |---|---|---|
-| `vda5050_core` unit tests | 115 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
+| `vda5050_core` unit tests | 123 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
 | `fault_core` unit tests | 54 tests, 98 % line coverage | Same as above |
+| `fleet_core` unit tests | 91 tests, 97 % line coverage, among them a simulated fleet with independent monitors and seeded soak tests | Same as above |
+| Fleet system test | Passes | GitHub Actions: the fleet manager program, a real Mosquitto broker, four vehicle processes |
 | `fault_gateway` unit tests | 37 tests of the HTTP layer and the JSON conversion | `colcon test` (pytest) |
 | Fault management system test | Passes | ROS 2 Jazzy container: fault manager, adapter, gateway, real Mosquitto broker, rosbag2, fake Nav2 |
 | Conformance to the official JSON schemas | All published messages and all example inputs conform to versions 2.0.0 and 2.1.0, with one documented deviation | GitHub Actions; schemas cloned from the official repository at fixed tags |
-| ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all six packages (the Python package runs flake8 and pep257) | `colcon test` |
+| ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all eight packages (the Python package runs flake8 and pep257) | `colcon test` |
 | Fuzzing of the JSON parser and decoders | 60 s per CI run (about 235,000 inputs), no findings | GitHub Actions, libFuzzer with ASan and UBSan |
 | `vda5050_nav2_adapter` integration test | Passes | ROS 2 Jazzy container, real Mosquitto broker, fake Nav2 |
 | `vda5050_nav2_adapter` system test | Passes in both modes | Real broker and real Nav2: once with the loopback simulator, once in Gazebo with lidar and AMCL |
@@ -39,12 +41,13 @@ bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
 
 ## What exists
 
-115 unit tests in seven suites:
+123 unit tests in eight suites:
 
 | Suite | Tests | What it pins down |
 |---|---|---|
 | `Json` | 15 | Scalars, nesting, string escapes incl. surrogate pairs, malformed inputs, numbers that are not JSON, nesting limit, error offset, deterministic output, round trip |
 | `Codec` | 14 | Full order decode, both spellings of `allowedDeviation`, error messages naming the bad field, instant actions (current and legacy key), state encoding incl. every schema-required field, empty state, connection, visualization, factsheet required fields |
+| `CodecMaster` | 8 | The master control side: an order and instant actions encoded here are decoded by the vehicle side unchanged; a state and a connection message from the vehicle side are decoded here unchanged; wrong types are named |
 | `Header` | 3 | Topic names, ISO 8601 formatting incl. pre-1970, per-topic header counters |
 | `OrderValidator` | 9 | Each graph rule, plus "all problems reported, not just the first" |
 | `OrderManagerTest` | 57 | The state machine (below) |
@@ -119,7 +122,17 @@ untested behaviour, and tests were added for it: a cancel that completes
 because the leg finished first, a second cancel during a cancel, an
 unsupported action on an edge, every JSON escape, and wrong types in messages.
 
-Coverage exists for the core only. The adapter has no unit tests.
+The table above was measured before the master control side of the codec
+was added (eight more tests, about 250 more lines in `codec.cpp`); the total
+is unchanged at 98.8 %.
+
+`fault_core` and `fleet_core` are measured the same way, with the same 95 %
+threshold. `fleet_core`: 97 %. Its uncovered lines are mostly the handling of
+a plan that fails the check, which no test can provoke, and fall-through
+returns.
+
+The adapter, the ROS nodes and the two programs of `vda5050_fleet` have no
+unit tests and no coverage figure.
 
 ## Conformance to the official JSON schemas
 
@@ -216,6 +229,14 @@ The same was done for the fault management code, with eleven bugs:
 The last one matters because the fault system test passed on its first CI
 run. A test that has never failed proves little, so it was made to fail once.
 
+And for the fleet manager, the two rules that everything rests on were each
+switched off once:
+
+| Injected bug | Result |
+|---|---|
+| The order rule always says yes (moves are granted in any order) | Five tests failed: the head-on meeting at the siding, the corridor case, the test with message loss, and both soak tests. Vehicles locked each other in and tasks never finished |
+| The claims rule is skipped (a move is granted whatever others hold) | Nine tests failed, each with the monitors reporting conflicting claims or vehicles too close |
+
 These are spot checks, not systematic mutation testing.
 
 AddressSanitizer also found one real defect during development, in a test
@@ -248,6 +269,121 @@ No other defect was found in the fault management code. Two defects were in test
 fired during an unrelated flicker test; an HTTP test closed a connection but
 not its response, so the socket stayed open). The first CI build found one
 deprecated rosbag2 call and one line over the length limit.
+
+## Fleet traffic control
+
+What the fleet manager is: [fleet_management.md](fleet_management.md).
+
+**Unit tests of the parts** (`test_roadmap.cpp`, `test_planner.cpp`): the
+roadmap and its error messages, the distance between segments, which
+resources conflict; the single-vehicle planner (waiting, stops in order,
+dwell, resting out of the way); the fleet planner on cases built to need
+each of its stages; the plan check itself, which must reject each kind of
+wrong plan; 400 random problems.
+
+**The simulated fleet** (`test/sim.hpp`). The class `World` holds one
+`FleetManager` and any number of `SimVehicle`s. A `SimVehicle` is a real
+`vda5050_core::Session` whose navigation port moves a point. Messages between
+them pass through queues with a delay, random extra delay and a loss rate.
+Time is a number that `World::step()` advances by 50 ms, so a simulated
+minute takes about a millisecond.
+
+After every step three monitors run. They use only the vehicles' true
+positions, the roadmap's geometry and the list of what each vehicle holds:
+
+| Monitor | Fails when |
+|---|---|
+| Distance | Two vehicles are closer than two radii |
+| Claims | Two vehicles hold resources that conflict |
+| Presence | A vehicle is further than the attach tolerance from everything it holds |
+
+The second and third together imply the first, with margin. They are checked
+separately because they fail earlier and say why.
+
+**Tests of what goes wrong** (`test_fleet_robustness.cpp`, 33 tests). One
+per failure: a lost first state, a vehicle that never says where it is, a
+vehicle appearing on a granted route, vehicles switched on too close, a
+vehicle on a foreign order, off the roadmap, on an edge, in manual mode, a
+vehicle that forgets its order, lost orders, an offline vehicle, failed
+drives, failed and unsupported actions, cancelled tasks, a fault hold. Each
+asserts the specific reaction and that the monitors stayed silent.
+
+**Soak tests.** `FleetSoak` generates scenarios from a seed: one of four map
+kinds, one to six vehicles with speeds between 0.5 and 1.5 m/s, two to nine
+tasks with one or two stops arriving over 30 s, network delay of 20 to
+120 ms, and 10 % message loss in every third scenario. The second test adds
+a fault every ten seconds on average during the first minute (a dropped
+connection, a failing drive, a change of speed, a hold, a fatal error, a
+cancelled task) and, afterwards, an operator who puts failed vehicles back
+into service.
+
+Pass means the monitors were silent, no plan failed the check, and at the
+end no task was open. Without faults, every task must have finished.
+
+The suite runs 40 and 25 scenarios (a second in a Release build, under a
+minute with sanitizers). The same binary runs more:
+
+```bash
+cmake -S fleet_core -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+FLEET_SOAK_SCENARIOS=20000 ./build/fleet_core_tests
+```
+
+Result on the code as merged, one run:
+
+| | Scenarios | Tasks | Finished | Monitor violations | Tasks left open |
+|---|---|---|---|---|---|
+| Without faults | 20,000 | 109,755 | 109,755 | 0 | 0 |
+| With faults | 20,000 | 110,223 | 102,132 | 0 | 0 |
+
+With faults, the tasks not finished were cancelled by the injected operator
+or failed because their vehicle was taken out of service or an order was
+cut short; none was left hanging.
+
+What this does and does not show: over these scenarios the two properties
+held. The scenarios are small, the generator has its habits, and the
+vehicle is a point. It is evidence, not proof. The claims rule has an
+argument behind it that does not depend on tests (see the design document);
+the liveness of the whole system has not.
+
+**What the soak tests found** during development, each fixed and pinned by a
+named test:
+
+| Found | Now tested by |
+|---|---|
+| A task cancelled while its first order was in flight left the fleet manager believing the vehicle idle; the vehicle then drove with nothing reserved | `AnOrderOnItsWayToAVehicleThatIsToBeStoppedIsSeenThrough` |
+| A drive failed while an order update was lost; the update was never sent again because the vehicle counted as unusable, so the failure was never handled | `AFailureIsNoticedEvenWhileAnOrderIsUnconfirmed` |
+| After a task failed at a stop, the vehicle drove on, and the stops it reached were credited to its next task | `AFailedActionFailsTheTask` |
+| The same with an order confirmed late: a counter ran past the end of an array (found by AddressSanitizer) | the soak test itself |
+| On a crowded one-way loop vehicles circled for ever: a vehicle passing its stop while it had no complete route was never told to work there | `ACrowdedOneWayLoopKeepsMovingUntilEveryStopIsServed` |
+| A vehicle with three granted steps of a detour kept a corridor shut while the plan changed under it | `TwoRobotsWhoseStopsLieBehindEachOtherInACorridor` |
+| The one-step stage pushed away a vehicle that stood at its own stop, and the result failed the plan check | `ARobotWorkingAtItsStopIsNotPushedAway` |
+| A vehicle appearing inside another's granted route made every plan fail the check until it left | `AVehicleAppearingOnAnotherOnesRouteStopsThatOne` |
+
+One finding was in the test harness, not the product: the simulated vehicle
+kept a pause from a goal that had failed, and never moved again.
+
+**System test** (`vda5050_fleet/test/fleet_system_test.py`). The parts the
+unit tests cannot reach: the MQTT client, the two programs' loops, real
+processes dying. The script starts a Mosquitto broker, `fleet_manager` and
+four `sim_vehicle` processes on the demo roadmap, and then:
+
+1. waits until all four vehicles are found at their nodes
+2. sends a task to a node that does not exist and expects a refusal
+3. submits eight tasks that cross each other and waits until all are finished
+4. cancels a task while its vehicle drives; the vehicle must end at a node,
+   usable
+5. kills a vehicle process in the middle of a task; the fleet manager must
+   report it offline and keep what it held; two other vehicles finish new
+   tasks meanwhile
+6. starts that vehicle again where it stood; it is found on its edge, sent
+   on, and finishes its task
+7. checks the counters (eleven tasks finished, no plan failed the check)
+8. stops the fleet manager and expects its `OFFLINE`
+
+Throughout, it records each vehicle's position from the `visualization`
+topic (10 Hz) and fails if two were ever closer than two radii minus 0.25 m
+of allowance for the positions not being simultaneous. In the runs so far
+the closest approach was 2.0 m.
 
 ## The adapter integration test
 
@@ -359,11 +495,12 @@ problems, none of which the earlier stand-in-header syntax check could have:
 
 | Job | Result |
 |---|---|
-| Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 115/115 pass, example passes; `fault_core` 54/54 pass |
-| Standalone CMake, Clang, same flags | 115/115 pass, example passes; `fault_core` 54/54 pass |
-| colcon on `ros:jazzy`, all six packages | builds with no warnings; 115/115, 54/54 and the gateway's 37 pass; all linters pass |
+| Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 123/123 pass, example passes; `fault_core` 54/54 pass; `fleet_core` 91/91 pass |
+| Standalone CMake, Clang, same flags | 123/123 pass, example passes; `fault_core` 54/54 pass; `fleet_core` 91/91 pass |
+| colcon on `ros:jazzy`, all eight packages | builds with no warnings; 123/123, 54/54, 91/91 and the gateway's 37 pass; all linters pass |
+| Fleet system test, Release build, real Mosquitto broker | passes |
 | Schema conformance, 2.0.0 and 2.1.0 | passes |
-| Coverage of `vda5050_core` | 98.8 % lines |
+| Coverage of `vda5050_core`, `fault_core`, `fleet_core` | 98.8 %, 98 %, 97 % lines |
 | Integration test on `ros:jazzy` | passes |
 | Nav2 system test on `ros:jazzy`, loopback simulator | passes |
 | Nav2 system test on `ros:jazzy`, Gazebo with software rendering under Xvfb | passes |
@@ -376,8 +513,16 @@ The core was additionally built locally in Release with
 Read this before claiming more than is true.
 
 - **A physical robot.** Everything that moves is simulated.
-- **A real fleet manager.** Master control is a shell script. Interoperability
-  rests on schema conformance, not on a session with a real product.
+- **A real fleet manager from somebody else.** Against the adapter, master
+  control is a shell script. The fleet manager in this repository has only
+  met this repository's own vehicle side, so a shared misreading of the
+  standard would not show. Interoperability rests on schema conformance, not
+  on a session with a real product.
+- **The fleet manager with Nav2.** Its vehicles in every test are the
+  protocol core with a point for a body. It has not driven the adapter.
+- **The fleet manager at scale or over days.** Up to six vehicles, up to 24
+  nodes, simulated minutes. Planning time on a large roadmap was not
+  measured.
 - **Unit tests and coverage for the ROS nodes.** The adapter, the fault manager
   node and the gateway's ROS code are exercised only end to end.
 - **The fault hold as a safety measure.** It is tested as software behaviour

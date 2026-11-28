@@ -199,3 +199,26 @@ places only: `OrderManager::set_external_errors()` and
 `OrderManager::set_hold()`. The bridge core knows nothing about faults, and
 the adapter works unchanged when no fault manager is running. See
 [fault_management.md](fault_management.md).
+
+## Fleet traffic control
+
+The other side of the protocol follows the same shape once more. `fleet_core`
+is a library without ROS and MQTT; `vda5050_fleet` is a program around it. It
+uses `vda5050_core` for the message types and, in its tests, for the vehicles:
+the test fleet is made of real `Session` objects.
+
+```
+            tasks (JSON)                      VDA 5050
+ client ───────────────────▶ fleet manager ◀────────────▶ vehicle 1..n
+                              │
+                              ├─ assign      queued tasks -> free vehicles
+                              ├─ plan        plan_fleet(): timed routes for all
+                              ├─ check       validate_fleet_plan()
+                              ├─ grant       claims rule + order rule, per move
+                              └─ send        order / order update (base + horizon)
+```
+
+Inside, `FleetManager::tick()` does those five things in that order, and
+`on_message()` updates what is known about a vehicle. There are no threads
+and no timers: time comes in as an argument, as in `OrderManager`. See
+[fleet_management.md](fleet_management.md).

@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <vector>
@@ -1059,6 +1061,15 @@ Scenario run_scenario(unsigned seed, bool chaos)
   return result;
 }
 
+/// How many scenarios a soak test runs. The default keeps the test suite
+/// quick; FLEET_SOAK_SCENARIOS=10000 turns the same test into a long run.
+unsigned scenario_count(unsigned by_default)
+{
+  const char * text = std::getenv("FLEET_SOAK_SCENARIOS");
+  const long wanted = text == nullptr ? 0 : std::strtol(text, nullptr, 10);  // NOLINT(runtime/int)
+  return wanted > 0 ? static_cast<unsigned>(wanted) : by_default;
+}
+
 void run_many(unsigned first_seed, unsigned count, bool chaos)
 {
   std::size_t tasks = 0;
@@ -1083,6 +1094,8 @@ void run_many(unsigned first_seed, unsigned count, bool chaos)
   } else {
     EXPECT_GT(finished, tasks / 2);
   }
+  std::printf(
+    "             %u scenarios, %zu tasks, %zu finished\n", count, tasks, finished);
 }
 
 }  // namespace
@@ -1092,7 +1105,7 @@ TEST(FleetSoak, RandomFleetsFinishEveryTaskWithoutAnyVehicleComingTooClose)
   // 40 random scenarios: grids, a corridor with a siding, one-way loops; up to
   // six vehicles of different speeds; tasks arriving over time; network delay,
   // jitter and (in every third scenario) 10 % message loss.
-  run_many(1, 40, false);
+  run_many(1, scenario_count(40), false);
 }
 
 TEST(FleetSoak, WithFaultsInjectedNoVehicleComesTooCloseAndNoTaskIsLeftHanging)
@@ -1101,5 +1114,5 @@ TEST(FleetSoak, WithFaultsInjectedNoVehicleComesTooCloseAndNoTaskIsLeftHanging)
   // minute: connections dropped, drives failing, vehicles slowed, held, with
   // fatal errors, tasks cancelled. Afterwards every task must have ended one
   // way or another, and the monitors must have stayed silent throughout.
-  run_many(1001, 25, true);
+  run_many(1000001, scenario_count(25), true);
 }
