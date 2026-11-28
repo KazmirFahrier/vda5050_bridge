@@ -1,0 +1,6 @@
+# Acknowledge a latched fault whose cause is gone (state AWAITING_ACK).
+string code
+---
+# False if the fault is unknown, not waiting for acknowledgement, or still present.
+bool success
+string message

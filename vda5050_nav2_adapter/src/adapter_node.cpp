@@ -3,12 +3,16 @@
 
 #include "vda5050_nav2_adapter/adapter_node.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "fault_core/types.hpp"
+#include "fault_core/vda5050_mapping.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "tf2/exceptions.h"
 #include "tf2/time.h"
@@ -17,6 +21,17 @@ namespace vda5050_nav2_adapter
 {
 
 using vda5050_core::ActionStatus;
+
+namespace
+{
+
+// Fault codes this node reports about itself. They are listed in the example
+// catalogue of the fault_manager package.
+constexpr char kFaultMqtt[] = "BRIDGE-MQTT-001";
+constexpr char kFaultNav[] = "BRIDGE-NAV-001";
+constexpr char kFaultLocalization[] = "BRIDGE-LOC-001";
+
+}  // namespace
 
 AdapterNode::AdapterNode(const rclcpp::NodeOptions & options)
 : rclcpp_lifecycle::LifecycleNode("vda5050_adapter", options)
@@ -57,6 +72,15 @@ AdapterNode::AdapterNode(const rclcpp::NodeOptions & options)
   declare_parameter("factsheet.height_max", 0.5);
   declare_parameter("factsheet.width", 0.5);
   declare_parameter("factsheet.length", 0.7);
+
+  // Fault integration; see the note at the top of adapter_node.hpp.
+  declare_parameter("faults.enabled", true);
+  // Hold the vehicle (pause driving, start nothing new) while a fault that
+  // maps to errorLevel FATAL is raised.
+  declare_parameter("faults.hold_on_fatal", true);
+  // If a fault manager was heard once and then falls silent for this long,
+  // master control is told so with a warning in state.errors.
+  declare_parameter("faults.timeout_s", 15.0);
 
   // When true, main() drives the node to ACTIVE itself. Leave false when a
   // lifecycle manager is in charge of start-up ordering.
@@ -168,6 +192,22 @@ AdapterNode::CallbackReturn AdapterNode::on_configure(const rclcpp_lifecycle::St
       }
     });
 
+  if (get_parameter("faults.enabled").as_bool()) {
+    hold_on_fatal_fault_ = get_parameter("faults.hold_on_fatal").as_bool();
+    fault_timeout_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(get_parameter("faults.timeout_s").as_double()));
+    fault_errors_.clear();
+    faults_received_ = false;
+    fault_manager_silent_ = false;
+    // Transient local: the current list arrives at once, also when this node
+    // starts after the fault manager.
+    fault_subscription_ = create_subscription<fault_msgs::msg::FaultArray>(
+      "faults/active", rclcpp::QoS(1).reliable().transient_local(),
+      [this](const fault_msgs::msg::FaultArray & faults) {on_faults(faults);});
+    fault_report_publisher_ = create_publisher<fault_msgs::msg::FaultReport>(
+      "faults/report", rclcpp::QoS(100).reliable());
+  }
+
   RCLCPP_INFO(
     get_logger(), "configured as %s",
     vda5050_core::topic_name(identity, "").c_str());
@@ -237,6 +277,8 @@ void AdapterNode::release_resources()
   timer_.reset();
   battery_subscription_.reset();
   odometry_subscription_.reset();
+  fault_subscription_.reset();
+  fault_report_publisher_.reset();
   tf_listener_.reset();
   tf_buffer_.reset();
   session_.reset();  // first: it refers to the three below
@@ -268,7 +310,85 @@ void AdapterNode::on_timer()
 
   // 2. Fresh pose, then 3. publish whatever is due.
   update_position();
+  report_own_health(now);
   session_->tick(now);
+}
+
+void AdapterNode::on_faults(const fault_msgs::msg::FaultArray & faults)
+{
+  if (!session_) {
+    return;
+  }
+  std::vector<fault_core::FaultRecord> records;
+  for (const fault_msgs::msg::Fault & fault : faults.faults) {
+    fault_core::FaultRecord record;
+    record.code = fault.code;
+    record.severity = static_cast<fault_core::Severity>(
+      std::min<int>(fault.severity, static_cast<int>(fault_core::Severity::Critical)));
+    record.state = static_cast<fault_core::FaultState>(
+      std::min<int>(fault.state, static_cast<int>(fault_core::FaultState::AwaitingAck)));
+    record.description = fault.description;
+    record.message = fault.message;
+    record.source = fault.source;
+    record.known = fault.known;
+    record.occurrence_count = fault.occurrence_count;
+    records.push_back(std::move(record));
+  }
+  fault_errors_ = fault_core::to_vda5050_errors(records);
+  faults_received_ = true;
+  fault_manager_silent_ = false;
+  last_faults_time_ = std::chrono::steady_clock::now();
+  apply_faults();
+}
+
+void AdapterNode::apply_faults()
+{
+  std::vector<vda5050_core::Error> errors = fault_errors_;
+  bool fatal = false;
+  for (const vda5050_core::Error & error : errors) {
+    fatal = fatal || error.error_level == vda5050_core::ErrorLevel::Fatal;
+  }
+  if (fault_manager_silent_) {
+    // The list above may be out of date. Say so instead of pretending.
+    errors.push_back(
+      vda5050_core::Error{
+        "faultManagerTimeout", {}, "the fault manager has stopped publishing; "
+        "the reported faults may be out of date", vda5050_core::ErrorLevel::Warning});
+  }
+  session_->orders().set_external_errors(std::move(errors));
+  if (hold_on_fatal_fault_) {
+    session_->orders().set_hold(fatal);
+  }
+}
+
+void AdapterNode::report_own_health(std::chrono::steady_clock::time_point now)
+{
+  if (!fault_report_publisher_) {
+    return;
+  }
+  if (faults_received_ && !fault_manager_silent_ && now - last_faults_time_ > fault_timeout_) {
+    RCLCPP_WARN(get_logger(), "no message on faults/active for too long");
+    fault_manager_silent_ = true;
+    apply_faults();
+  }
+  if (now - last_health_report_ < std::chrono::seconds(1)) {
+    return;
+  }
+  last_health_report_ = now;
+
+  const auto report = [this](const char * code, bool failing, const char * message) {
+      fault_msgs::msg::FaultReport out;
+      out.code = code;
+      out.failing = failing;
+      out.source = get_name();
+      out.message = failing ? message : "";
+      fault_report_publisher_->publish(out);
+    };
+  report(kFaultMqtt, !session_->connected(), "not connected to the MQTT broker");
+  report(kFaultNav, !navigation_->server_available(), "Nav2 action server is not available");
+  report(
+    kFaultLocalization, !position_.position_initialized,
+    "no transform from the global frame to the robot");
 }
 
 void AdapterNode::update_position()

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fault_manager</name>
+  <version>0.1.0</version>
+  <description>
+    ROS 2 node that collects fault reports, decides which are real faults using fault_core,
+    publishes the active faults, keeps a history and records a rosbag2 snapshot when a fault
+    activates.
+  </description>
+  <maintainer email="maintainer@example.com">vda5050_bridge maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>fault_core</depend>
+  <depend>fault_msgs</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>rosbag2_cpp</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rosbag2_storage_default_plugins</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_cmake_cpplint</test_depend>
+  <test_depend>ament_cmake_uncrustify</test_depend>
+  <test_depend>ament_cmake_xmllint</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_flake8</test_depend>
+  <test_depend>ament_cmake_pep257</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

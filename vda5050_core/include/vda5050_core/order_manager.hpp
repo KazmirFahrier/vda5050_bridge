@@ -87,6 +87,14 @@ public:
   /// them. A state update is requested only if the set really changed.
   void set_external_errors(std::vector<Error> errors);
 
+  /// Hold the vehicle for a reason outside the order, such as a fatal fault.
+  /// While held, a running drive is paused and no new leg or action is
+  /// started; the order itself is kept. The hold is independent of
+  /// startPause / stopPause from master control: the vehicle moves only when
+  /// neither applies. State.paused reports true for either reason.
+  void set_hold(bool hold);
+  bool held() const noexcept {return hold_;}
+
   // ---- outputs ------------------------------------------------------------
 
   /// The current vehicle state. The header is left empty for the caller to stamp.
@@ -159,6 +167,7 @@ private:
 
   bool driving_{false};
   bool paused_{false};
+  bool hold_{false};        ///< Held from outside the order, see set_hold().
   bool halted_{false};      ///< Navigation failed; wait for master to cancel.
   bool cancelling_{false};  ///< cancelOrder received, waiting for the vehicle to stop.
   std::string cancel_action_id_;

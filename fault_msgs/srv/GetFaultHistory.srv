@@ -1,0 +1,14 @@
+# Query recorded fault events. All filters are optional.
+
+# Only this fault code. Empty: all codes.
+string code
+# Only events of at least this severity (SEVERITY_ constants of Fault).
+uint8 min_severity
+# Only events with a sequence number greater than this. Lets a client ask for
+# exactly what it has not seen yet.
+uint64 after_sequence
+# At most this many events, the newest ones. 0: no limit.
+uint32 limit
+---
+# Oldest first.
+FaultEvent[] events

@@ -13,13 +13,22 @@
 // (timer, action results, subscriptions) then runs one at a time, which is the
 // contract vda5050_core::Session requires. MQTT events cross from the
 // libmosquitto thread through a queue that the timer drains.
+//
+// Faults: the node reports its own health (broker connection, Nav2, pose) on
+// faults/report, and mirrors what a fault manager publishes on faults/active
+// into the `errors` list of the VDA 5050 state. Both are optional: without a
+// fault manager running, nothing changes.
 
 #ifndef VDA5050_NAV2_ADAPTER__ADAPTER_NODE_HPP_
 #define VDA5050_NAV2_ADAPTER__ADAPTER_NODE_HPP_
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "fault_msgs/msg/fault_array.hpp"
+#include "fault_msgs/msg/fault_report.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -55,6 +64,9 @@ public:
 private:
   void on_timer();
   void update_position();
+  void on_faults(const fault_msgs::msg::FaultArray & faults);
+  void apply_faults();
+  void report_own_health(std::chrono::steady_clock::time_point now);
   void go_offline();
   void release_resources();
   vda5050_core::Factsheet build_factsheet(const vda5050_core::SessionConfig & config);
@@ -71,6 +83,17 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr battery_subscription_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
   rclcpp::TimerBase::SharedPtr timer_;
+
+  // Fault integration.
+  rclcpp::Subscription<fault_msgs::msg::FaultArray>::SharedPtr fault_subscription_;
+  rclcpp::Publisher<fault_msgs::msg::FaultReport>::SharedPtr fault_report_publisher_;
+  std::vector<vda5050_core::Error> fault_errors_;  ///< From the last faults/active message.
+  bool hold_on_fatal_fault_{true};
+  bool faults_received_{false};
+  bool fault_manager_silent_{false};
+  std::chrono::steady_clock::time_point last_faults_time_{};
+  std::chrono::steady_clock::time_point last_health_report_{};
+  std::chrono::steady_clock::duration fault_timeout_{std::chrono::seconds(15)};
 
   std::string map_id_;
   std::string global_frame_;

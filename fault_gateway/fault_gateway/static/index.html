@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot faults</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #1c2430; background: #f6f7f9; }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+  #status { color: #5b6675; margin-bottom: 1rem; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e3e6eb; font-size: .9rem; }
+  th { background: #eef0f3; font-weight: 600; }
+  .sev { font-weight: 600; white-space: nowrap; }
+  .CRITICAL { color: #b3261e; } .ERROR { color: #c2570c; }
+  .WARNING { color: #8a6d00; } .INFO { color: #3b5b8c; }
+  .none { color: #2e7d32; padding: .8rem .6rem; background: #fff; }
+  button { font: inherit; padding: .2rem .6rem; cursor: pointer; }
+  input { font: inherit; padding: .2rem .4rem; width: 14rem; }
+  .muted { color: #5b6675; }
+</style>
+</head>
+<body>
+<h1>Robot faults</h1>
+<div id="status">connecting…</div>
+
+<h2>Raised now</h2>
+<div id="none" class="none" hidden>No faults.</div>
+<table id="faults" hidden>
+  <thead><tr><th>Severity</th><th>Code</th><th>State</th><th>What</th><th>Source</th>
+  <th>Count</th><th>Since</th><th></th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>Recent events</h2>
+<table id="events">
+  <thead><tr><th>#</th><th>Time (UTC)</th><th>Event</th><th>Severity</th><th>Code</th>
+  <th>Message</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<p class="muted">Access token for acknowledging (only if the gateway requires one):
+<input id="token" type="password" autocomplete="off"></p>
+
+<script>
+'use strict';
+const MAX_EVENTS = 50;
+const status = document.getElementById('status');
+
+// All values are inserted with textContent: fault texts come from other
+// programs and must never be interpreted as HTML.
+function cell(row, text, className) {
+  const td = row.insertCell();
+  td.textContent = text === undefined || text === null ? '' : String(text);
+  if (className) { td.className = className; }
+  return td;
+}
+
+function showFaults(payload) {
+  const table = document.getElementById('faults');
+  const body = table.tBodies[0];
+  body.replaceChildren();
+  for (const fault of payload.faults) {
+    const row = body.insertRow();
+    cell(row, fault.severity, 'sev ' + fault.severity);
+    cell(row, fault.code);
+    cell(row, fault.state);
+    cell(row, fault.message || fault.description);
+    cell(row, fault.source);
+    cell(row, fault.occurrenceCount);
+    cell(row, fault.lastActivated || '');
+    const action = row.insertCell();
+    if (fault.state === 'AWAITING_ACK') {
+      const button = document.createElement('button');
+      button.textContent = 'Acknowledge';
+      button.addEventListener('click', () => acknowledge(fault.code));
+      action.appendChild(button);
+    }
+  }
+  table.hidden = payload.faults.length === 0;
+  document.getElementById('none').hidden = payload.faults.length !== 0;
+}
+
+function addEvent(event) {
+  const body = document.getElementById('events').tBodies[0];
+  const row = body.insertRow(0);
+  cell(row, event.sequence);
+  cell(row, event.time);
+  cell(row, event.type);
+  cell(row, event.severity, 'sev ' + event.severity);
+  cell(row, event.code);
+  cell(row, event.message);
+  while (body.rows.length > MAX_EVENTS) { body.deleteRow(-1); }
+}
+
+async function acknowledge(code) {
+  const headers = {};
+  const token = document.getElementById('token').value;
+  if (token) { headers['Authorization'] = 'Bearer ' + token; }
+  const response = await fetch(
+    '/api/v1/faults/' + encodeURIComponent(code) + '/acknowledge', {method: 'POST', headers});
+  if (response.status === 401) {
+    status.textContent = 'Acknowledge refused: access token missing or wrong.';
+  } else if (!response.ok) {
+    const answer = await response.json().catch(() => ({}));
+    status.textContent = 'Acknowledge refused: ' + (answer.reason || response.status);
+  }
+}
+
+async function start() {
+  try {
+    const history = await (await fetch('/api/v1/history?limit=' + MAX_EVENTS)).json();
+    for (const event of history.events || []) { addEvent(event); }
+  } catch (error) { /* the stream below will still show new events */ }
+
+  const stream = new EventSource('/api/v1/events');
+  stream.addEventListener('open', () => { status.textContent = 'live'; });
+  stream.addEventListener('error', () => { status.textContent = 'connection lost; retrying…'; });
+  stream.addEventListener('faults', (message) => showFaults(JSON.parse(message.data)));
+  stream.addEventListener('fault_event', (message) => addEvent(JSON.parse(message.data)));
+}
+start();
+</script>
+</body>
+</html>

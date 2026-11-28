@@ -14,6 +14,8 @@
   <buildtool_depend>pkg-config</buildtool_depend>
 
   <depend>vda5050_core</depend>
+  <depend>fault_core</depend>
+  <depend>fault_msgs</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>rclcpp_action</depend>

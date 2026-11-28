@@ -1,0 +1,48 @@
+{
+  "faults": [
+    {
+      "code": "BRIDGE-MQTT-001",
+      "severity": "ERROR",
+      "description": "No connection to the MQTT broker; master control cannot reach the vehicle",
+      "activateAfterMs": 2000,
+      "clearAfterMs": 1000,
+      "timeoutMs": 10000
+    },
+    {
+      "code": "BRIDGE-NAV-001",
+      "severity": "CRITICAL",
+      "description": "The Nav2 navigation action server is not available",
+      "activateAfterMs": 3000,
+      "clearAfterMs": 1000,
+      "timeoutMs": 10000
+    },
+    {
+      "code": "BRIDGE-LOC-001",
+      "severity": "ERROR",
+      "description": "No transform from the map frame to the robot: localisation is missing",
+      "activateAfterMs": 3000,
+      "clearAfterMs": 1000,
+      "timeoutMs": 10000
+    },
+    {
+      "code": "LIDAR-001",
+      "severity": "CRITICAL",
+      "description": "Lidar is not delivering scans",
+      "activateAfterMs": 500,
+      "clearAfterMs": 2000
+    },
+    {
+      "code": "BATTERY-001",
+      "severity": "WARNING",
+      "description": "Battery charge is low",
+      "activateAfterMs": 5000,
+      "clearAfterMs": 5000
+    },
+    {
+      "code": "BUMPER-001",
+      "severity": "CRITICAL",
+      "description": "Bumper contact",
+      "latched": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Example parameters for the fault gateway.
+fault_gateway:
+  ros__parameters:
+    # 127.0.0.1 serves this machine only. Use 0.0.0.0 to serve the network,
+    # and then set api_token: the API itself has no encryption (put a reverse
+    # proxy with TLS in front of it if the network is not trusted).
+    host: "127.0.0.1"
+    port: 8080
+    # When set, acknowledging a fault needs "Authorization: Bearer <token>".
+    # Reading is always open. Do not commit a real token.
+    api_token: ""
+    service_timeout_s: 2.0

@@ -1,0 +1,39 @@
+# Example parameters for the fault manager.
+fault_manager:
+  ros__parameters:
+    # JSON catalogue of known faults. The launch file fills in the example
+    # catalogue of this package when this is left empty.
+    catalog_file: ""
+
+    # Fault events are appended here (JSON Lines) and read back at start-up.
+    # Empty: history is kept in memory only.
+    history_file: "/tmp/fault_history.jsonl"
+    history_max_bytes: 1048576     # rotate to "<file>.1" beyond this size; 0 = never
+    history_capacity: 1000         # events kept in memory and served by the service
+
+    # A report for a code that is not in the catalogue is tracked with severity
+    # ERROR and marked "unknown". Set false to drop such reports.
+    accept_unknown_codes: true
+
+    tick_rate_hz: 10.0             # resolution of debounce times and watchdogs
+    publish_interval_s: 5.0        # faults/active is repeated at least this often
+
+    diagnostics:
+      enabled: true
+      topic: "/diagnostics"
+      # DiagnosticStatus names and the fault codes they map to (same order), e.g.
+      #   names: ["lidar_driver: scan rate", "bms: charge"]
+      #   codes: ["LIDAR-001", "BATTERY-001"]
+      fail_level: 2                # 1 = WARN and worse, 2 = ERROR and worse
+
+    # Flight recorder: keeps the last seconds of these topics in memory and
+    # writes them to a rosbag2 bag when a fault activates.
+    capture:
+      enabled: false
+      directory: "/tmp/fault_captures"
+      topics: ["/tf", "/odom", "/cmd_vel", "/scan"]
+      pre_seconds: 10.0
+      post_seconds: 2.0
+      min_severity: "ERROR"        # faults below this do not trigger a capture
+      max_buffer_mb: 64
+      max_bags: 20

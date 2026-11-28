@@ -880,3 +880,97 @@ TEST_F(OrderManagerTest, ExternalErrorsAreReportedAlongsideOrderErrors)
   EXPECT_TRUE(manager.consume_state_changed());
   EXPECT_TRUE(manager.snapshot().errors.empty());
 }
+
+TEST_F(OrderManagerTest, HoldPausesTheDriveAndReleaseResumesIt)
+{
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  manager.consume_state_changed();
+
+  manager.set_hold(true);
+  EXPECT_EQ(navigation.pause_calls, 1);
+  EXPECT_TRUE(manager.held());
+  EXPECT_TRUE(manager.consume_state_changed());
+  State state = manager.snapshot();
+  EXPECT_TRUE(state.paused);
+  EXPECT_FALSE(state.driving);
+  EXPECT_EQ(state.order_id, "o1");  // the order is kept
+
+  manager.set_hold(true);  // repeated: nothing happens
+  EXPECT_EQ(navigation.pause_calls, 1);
+  EXPECT_FALSE(manager.consume_state_changed());
+
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.resume_calls, 1);
+  state = manager.snapshot();
+  EXPECT_FALSE(state.paused);
+  EXPECT_TRUE(state.driving);
+  EXPECT_EQ(navigation.goals.size(), 1u);  // same goal, not re-sent
+}
+
+TEST_F(OrderManagerTest, HeldVehicleDoesNotStartTheNextLeg)
+{
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  manager.set_hold(true);
+  manager.on_navigation_succeeded();
+  EXPECT_EQ(navigation.goals.size(), 1u);
+
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.goals.size(), 2u);
+}
+
+TEST_F(OrderManagerTest, HoldBeforeAnOrderDelaysItsStart)
+{
+  manager.set_hold(true);
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  EXPECT_TRUE(navigation.goals.empty());  // accepted, but not started
+  EXPECT_EQ(manager.snapshot().order_id, "o1");
+
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.goals.size(), 1u);
+}
+
+TEST_F(OrderManagerTest, HoldAndMasterPauseAreIndependent)
+{
+  manager.handle_order(make_order("o1", 0, 3, 3));
+
+  // Master pauses, then a fault holds: one pause reaches navigation.
+  manager.handle_instant_actions(instant("p1", "startPause"));
+  manager.set_hold(true);
+  EXPECT_EQ(navigation.pause_calls, 1);
+
+  // The fault clears, but master control has not resumed: still paused.
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.resume_calls, 0);
+  EXPECT_TRUE(manager.snapshot().paused);
+
+  // The fault returns, then master resumes: the hold still applies.
+  manager.set_hold(true);
+  manager.handle_instant_actions(instant("p2", "stopPause"));
+  EXPECT_EQ(navigation.resume_calls, 0);
+  EXPECT_TRUE(manager.snapshot().paused);
+  EXPECT_TRUE(status_of("p2") == ActionStatus::Finished);
+
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.resume_calls, 1);
+  EXPECT_FALSE(manager.snapshot().paused);
+
+  // The other order: hold first, then master's pause adds no second call.
+  manager.set_hold(true);
+  EXPECT_EQ(navigation.pause_calls, 2);
+  manager.handle_instant_actions(instant("p3", "startPause"));
+  EXPECT_EQ(navigation.pause_calls, 2);
+}
+
+TEST_F(OrderManagerTest, OrderCanBeCancelledWhileHeld)
+{
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  manager.set_hold(true);
+  manager.handle_instant_actions(instant("c1", "cancelOrder"));
+  EXPECT_EQ(navigation.cancel_calls, 1);
+  manager.on_navigation_failed("cancelled");
+  EXPECT_TRUE(status_of("c1") == ActionStatus::Finished);
+
+  manager.set_hold(false);
+  EXPECT_EQ(navigation.resume_calls, 0);  // nothing left to resume
+  EXPECT_FALSE(manager.has_active_order());
+}
