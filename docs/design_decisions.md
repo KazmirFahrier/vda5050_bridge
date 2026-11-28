@@ -339,3 +339,80 @@ nothing about faults.
 
 **Cost.** `fault_core` cannot be used without `vda5050_core`. If it is ever
 needed alone, the JSON module should move to a small package of its own.
+
+## ADR-023: A critical fault holds the vehicle; the hold is separate from pause
+
+**Context.** VDA 5050 says a `FATAL` error means the vehicle cannot continue
+without help. Reporting `FATAL` while driving on would contradict that.
+
+**Decision.** `OrderManager::set_hold(bool)`. While held, a running drive is
+paused and nothing new starts; the order is kept. The adapter sets the hold
+while any raised fault maps to `FATAL`. The hold is a second flag next to the
+pause flag set by `startPause`; the vehicle moves only when both are false, and
+`state.paused` is true for either.
+
+**Why.** One shared flag would let `stopPause` from the fleet manager release
+a vehicle with a broken lidar, or let a cleared fault resume a vehicle the
+fleet manager had paused. Keeping the order (instead of cancelling) lets work
+continue after a short fault, which is what an operator expects after
+acknowledging.
+
+**Cost.** `state.paused` does not say which of the two reasons applies; the
+`errors` list does. This is a software reaction through Nav2 and must not be
+presented as a safety function. Parameter `faults.hold_on_fatal` turns it off.
+
+## ADR-024: The flight recorder is a ring buffer inside the fault manager
+
+**Context.** Data from before a fault is needed. rosbag2 offers a snapshot
+mode (`ros2 bag record --snapshot-mode`) that keeps a buffer and writes it when
+a service is called.
+
+**Decision.** The fault manager holds its own ring buffer of serialized
+messages (generic subscriptions) and writes a new bag per fault with
+`rosbag2_cpp::Writer`.
+
+**Why.** One bag per fault, named after the fault and stored with a summary,
+needs control over when a bag starts and ends; the snapshot mode appends to one
+recording of a separately started process. An in-process buffer also needs no
+second process to supervise and lets the capture continue for a defined time
+after the fault.
+
+**Cost.** More code than calling a service, and message data passes through
+this node, so very high-rate topics (cameras, point clouds) cost memory and
+CPU here. The buffer is bounded by size for that reason. For heavy sensors the
+rosbag2 snapshot mode, triggered from this node, would be the better tool.
+
+## ADR-025: The web API uses Python's standard HTTP server
+
+**Context.** Operators and other systems need the fault data over HTTP.
+FastAPI or Flask are the usual choices.
+
+**Decision.** `http.server.ThreadingHTTPServer` from the standard library, in a
+module that does not import ROS, with the ROS node as one implementation of a
+three-method backend interface.
+
+**Why.** Seven routes do not need a framework, and every dependency on a robot
+is something to package, update and audit. The separation makes the HTTP layer
+testable with real sockets and a fake backend, without ROS.
+
+**Cost.** No automatic request validation, no OpenAPI document, one thread per
+connection (fine for a handful of clients, not for hundreds), and
+authentication is a single shared token. A framework becomes the right choice
+when any of these starts to matter.
+
+## ADR-026: Debounce and watchdog times use the steady clock
+
+**Context.** ROS nodes usually use ROS time, which follows `/clock` in
+simulation.
+
+**Decision.** `fault_manager` passes `std::chrono::steady_clock` time to
+`fault_core`.
+
+**Why.** A watchdog must fire when a monitor is silent, also when the silence
+is caused by the simulator or the clock source having stopped. With ROS time, a
+stopped clock would stop the watchdogs too. The steady clock is also immune to
+wall-clock jumps (NTP).
+
+**Cost.** In a simulation running slower than real time, a 500 ms debounce is
+500 ms of real time, not of simulated time.
+

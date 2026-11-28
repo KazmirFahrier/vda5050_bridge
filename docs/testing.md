@@ -4,10 +4,12 @@
 
 | What | Result | Where it runs |
 |---|---|---|
-| `vda5050_core` unit tests | 110 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
-| `fault_core` unit tests | 52 tests, 98.5 % line coverage | Same as above |
+| `vda5050_core` unit tests | 115 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
+| `fault_core` unit tests | 54 tests, 98 % line coverage | Same as above |
+| `fault_gateway` unit tests | 36 tests of the HTTP layer and the JSON conversion | `colcon test` (pytest) |
+| Fault management system test | Passes | ROS 2 Jazzy container: fault manager, adapter, gateway, real Mosquitto broker, rosbag2, fake Nav2 |
 | Conformance to the official JSON schemas | All published messages and all example inputs conform to versions 2.0.0 and 2.1.0, with one documented deviation | GitHub Actions; schemas cloned from the official repository at fixed tags |
-| ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all three packages | `colcon test` |
+| ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all six packages (the Python package runs flake8 and pep257) | `colcon test` |
 | Fuzzing of the JSON parser and decoders | 60 s per CI run (about 235,000 inputs), no findings | GitHub Actions, libFuzzer with ASan and UBSan |
 | `vda5050_nav2_adapter` integration test | Passes | ROS 2 Jazzy container, real Mosquitto broker, fake Nav2 |
 | `vda5050_nav2_adapter` system test | Passes in both modes | Real broker and real Nav2: once with the loopback simulator, once in Gazebo with lidar and AMCL |
@@ -37,7 +39,7 @@ bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
 
 ## What exists
 
-110 unit tests in seven suites:
+115 unit tests in seven suites:
 
 | Suite | Tests | What it pins down |
 |---|---|---|
@@ -45,7 +47,7 @@ bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
 | `Codec` | 14 | Full order decode, both spellings of `allowedDeviation`, error messages naming the bad field, instant actions (current and legacy key), state encoding incl. every schema-required field, empty state, connection, visualization, factsheet required fields |
 | `Header` | 3 | Topic names, ISO 8601 formatting incl. pre-1970, per-topic header counters |
 | `OrderValidator` | 9 | Each graph rule, plus "all problems reported, not just the first" |
-| `OrderManagerTest` | 51 | The state machine (below) |
+| `OrderManagerTest` | 57 | The state machine (below) |
 | `OrderManagerReentrancy` | 1 | Ports that report results synchronously from inside the call |
 | `SessionTest` | 16 | MQTT behaviour (below) |
 
@@ -166,7 +168,7 @@ a smoke test, not a fuzzing campaign.
 
 ## Linters
 
-All three packages run `ament_lint_auto` in `colcon test`: cpplint, uncrustify,
+The C++ packages run `ament_lint_auto` in `colcon test`: cpplint, uncrustify,
 xmllint, lint_cmake, flake8 and pep257. Their first run asked for formatting
 changes in five files and reported six cpplint findings (three long lines, a
 header guard, a C `long long`, and constructors that are implicit on purpose
@@ -201,6 +203,19 @@ AddressSanitizer also found one real defect during development, in a test
 rather than in the library: a reference was kept into a temporary JSON document
 (`last_state().find("errors")->as_array()`), a use-after-free that passed
 silently without the sanitizer. It was fixed by keeping the document alive.
+
+## The fault management tests
+
+Described in [fault_management.md](fault_management.md#what-is-tested): the
+unit tests of `fault_core` and of the gateway's HTTP layer, and a system test
+(`fault_manager/test/fault_system_test.py`) in which the fault manager, the
+adapter and the gateway run together against a real broker. That test covers
+twelve scenarios, among them a critical fault that pauses an order until an
+operator acknowledges it over HTTP, the bag written by the flight recorder,
+a restart of the fault manager, and a killed adapter detected by watchdogs.
+
+What these runs found is listed in the table under
+[What these runs found](#what-these-runs-found).
 
 ## The adapter integration test
 
@@ -312,9 +327,9 @@ problems, none of which the earlier stand-in-header syntax check could have:
 
 | Job | Result |
 |---|---|
-| Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 110/110 pass, example passes; `fault_core` 52/52 pass |
-| Standalone CMake, Clang, same flags | 110/110 pass, example passes; `fault_core` 52/52 pass |
-| colcon on `ros:jazzy`, all three packages | builds with no warnings; 110/110 and 52/52 pass; all linters pass |
+| Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 115/115 pass, example passes; `fault_core` 54/54 pass |
+| Standalone CMake, Clang, same flags | 115/115 pass, example passes; `fault_core` 54/54 pass |
+| colcon on `ros:jazzy`, all six packages | builds with no warnings; 115/115, 54/54 and the gateway's 36 pass; all linters pass |
 | Schema conformance, 2.0.0 and 2.1.0 | passes |
 | Coverage of `vda5050_core` | 98.8 % lines |
 | Integration test on `ros:jazzy` | passes |
@@ -331,7 +346,12 @@ Read this before claiming more than is true.
 - **A physical robot.** Everything that moves is simulated.
 - **A real fleet manager.** Master control is a shell script. Interoperability
   rests on schema conformance, not on a session with a real product.
-- **Unit tests and coverage for the adapter.** It is exercised only end to end.
+- **Unit tests and coverage for the ROS nodes.** The adapter, the fault manager
+  node and the gateway's ROS code are exercised only end to end.
+- **The fault hold as a safety measure.** It is tested as software behaviour
+  (the order pauses and resumes). It is not a safety function.
+- **The web API under load or attack.** It is tested for correct behaviour,
+  including bad input and vanished clients, not for throughput or security.
 - **Repeatability of the Gazebo job.** A small number of CI runs. Physics on
   shared CI machines can be flaky; the obstacle scenario can take three
   minutes and its outcome depends on Nav2.

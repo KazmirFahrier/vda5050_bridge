@@ -15,7 +15,7 @@ as the rest; interviewers probe exactly there.
 > no ROS dependency: it decodes orders, validates them, runs a state machine
 > that walks the route node by node, schedules actions by their blocking type,
 > handles cancel and pause, and decides what goes out over MQTT and when. It has
-> 110 unit tests that run in milliseconds, with 98.8 % line coverage, and its
+> 115 unit tests that run in milliseconds, with 98.8 % line coverage, and its
 > messages validate against the official VDA 5050 JSON schemas. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
@@ -256,9 +256,53 @@ Raised faults are converted to VDA 5050 errors and given to the order
 manager, which lists them in `state.errors`. `CRITICAL` maps to `FATAL`,
 `ERROR` and `WARNING` to `WARNING`.
 
+**What happens on the robot when a critical fault appears?**
+The fault manager publishes it. The adapter lists it in the VDA 5050 state as
+`FATAL` and holds the vehicle: the drive is paused, the order is kept. When
+the fault is gone, or for a latched fault acknowledged, the vehicle continues.
+Add at once: this is a software reaction through Nav2, not a safety function.
+
+**How do you find out why a fault happened?**
+A flight recorder. The fault manager keeps the last seconds of chosen topics
+in memory, serialized, and writes them to a rosbag2 bag when a fault
+activates, together with a second or two afterwards. Recording everything
+always would fill the disk; recording after the fault is too late.
+
+**Why keep messages serialized?**
+A generic subscription delivers bytes. The node never decodes them, so it can
+capture any message type without depending on it, and buffering is cheap.
+
+**How does the web page stay up to date without polling?**
+Server-sent events: one long HTTP response on which the server writes each
+event. Each carries its sequence number as id. After a disconnect the browser
+sends the last id it saw, and the server replays what was missed from the
+history before continuing live.
+
+**Why no web framework?**
+The API is seven routes. Python's standard `http.server` handles that with no
+dependency to install on the robot. The HTTP layer is separate from ROS, which
+is why it has 29 tests that need no ROS. With more routes, authentication or
+many clients I would move to a framework.
+
+**How do ROS and the HTTP threads work together?**
+rclpy spins in the main thread; each HTTP request has its own thread. They
+share three things: the latest fault list behind a lock, a thread-safe event
+broker, and service calls, where the HTTP thread sends the request and waits
+with a timeout for the ROS thread to deliver the answer.
+
+**What if the fault manager crashes?**
+The gateway answers 503 and says so in `health`; it does not keep serving the
+old list. The adapter adds a warning to the VDA 5050 state that its fault
+list may be out of date. After the restart, history and counters come back
+from the file; active faults are detected afresh.
+
+**What if the adapter crashes?**
+Its three health faults have watchdogs, so its silence raises them.
+
 **What is the state of it?**
-A tested library. No ROS node uses it yet; that is the next milestone. Say
-this plainly.
+All of it runs in CI in one end-to-end test with a real broker: reports,
+debounce, latching, the hold during an order, acknowledge over HTTP, the bag,
+restarts. None of it has run on a physical robot.
 
 ## Be honest about
 
@@ -266,10 +310,12 @@ State these before you are asked.
 
 - It has never run on a physical robot or against a real fleet manager. A
   script plays master control.
-- `fault_core` is a library with unit tests. Nothing on a running robot uses
-  it yet: no node, no monitors, no web interface.
-- Coverage is measured for the two libraries only; the adapter has end-to-end tests but
-  no unit tests.
+- Fault management has only three built-in monitors, all about the bridge
+  itself. Holding the vehicle on a critical fault is not a safety function.
+  The web API has one optional shared token and no TLS.
+- Coverage is measured for the two libraries only; the adapter, the fault
+  manager node and the gateway's ROS code have end-to-end tests but no unit
+  tests.
 - With default Nav2 parameters the robot stops up to 0.24 m from a node and
   Nav2 can give up in a narrow passage. I report that correctly; I have not
   tuned Nav2.
