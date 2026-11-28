@@ -12,6 +12,8 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(vda5050_core REQUIRED)
+find_package(fault_core REQUIRED)
+find_package(fault_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -38,12 +40,14 @@ target_include_directories(${PROJECT_NAME}_lib PUBLIC
 )
 target_link_libraries(${PROJECT_NAME}_lib PUBLIC
   vda5050_core::vda5050_core
+  fault_core::fault_core
   PkgConfig::MOSQUITTO
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
   rclcpp_action::rclcpp_action
   tf2::tf2
   tf2_ros::tf2_ros
+  ${fault_msgs_TARGETS}
   ${lifecycle_msgs_TARGETS}
   ${nav2_msgs_TARGETS}
   ${nav_msgs_TARGETS}

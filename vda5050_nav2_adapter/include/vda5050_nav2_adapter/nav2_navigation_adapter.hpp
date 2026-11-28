@@ -41,6 +41,9 @@ public:
   void pause() override;
   void resume() override;
 
+  /// Whether the Nav2 action server can currently be reached.
+  bool server_available() const {return client_->action_server_is_ready();}
+
 private:
   void send_goal();
   void finish(bool success, const std::string & reason);

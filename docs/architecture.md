@@ -189,3 +189,13 @@ flag. `Session::tick(now)`, called at 20 Hz, is the single place that publishes.
 Several changes inside one tick therefore produce one state message, the state
 is always internally consistent when sent, and time is an argument, which keeps
 the periodic logic testable without sleeping.
+
+## Fault management
+
+Four further packages follow the same shape: logic without ROS in a library
+(`fault_core`), thin ROS code around it (`fault_manager`), and a web API whose
+HTTP layer does not know ROS (`fault_gateway`). They meet the bridge in two
+places only: `OrderManager::set_external_errors()` and
+`OrderManager::set_hold()`. The bridge core knows nothing about faults, and
+the adapter works unchanged when no fault manager is running. See
+[fault_management.md](fault_management.md).

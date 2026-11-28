@@ -4,23 +4,33 @@
 
 | Area | State |
 |---|---|
-| `vda5050_core` | Implemented; 110 unit tests, 98.8 % line coverage, schema-conformant |
-| `fault_core` | Library implemented; 52 unit tests. Not yet used by any ROS node |
+| `vda5050_core` | Implemented; 115 unit tests, 98.8 % line coverage, schema-conformant |
+| `fault_core` | Implemented; 54 unit tests |
+| `fault_msgs`, `fault_manager`, `fault_gateway` | Implemented; 37 unit tests for the gateway; one end-to-end test of all fault nodes passes in CI |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
-| CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
+| CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test and the fault system test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
 
-## Fault management: milestones
+## Fault management
 
-`fault_core` is the first of several steps. See
-[fault_management.md](fault_management.md) for what exists.
+All planned steps are implemented and verified in CI. See
+[fault_management.md](fault_management.md) for the design and its limits.
 
 | Step | Content | State |
 |---|---|---|
 | 1 | `fault_core` library; `OrderManager::set_external_errors()`; mapping to VDA 5050 errors | Done |
-| 2 | `fault_msgs` and a `fault_manager` ROS 2 node: report topic, `/diagnostics` input, services to list, query and acknowledge, history file | Not started |
-| 3 | The adapter subscribes to raised faults and puts them in `state.errors` | Not started |
-| 4 | Automatic data capture on a fault (rosbag2 snapshot of the last seconds) | Not started |
-| 5 | Web API (REST and server-sent events) for operators | Not started |
+| 2 | `fault_msgs` and the `fault_manager` node: report topic, `/diagnostics` input, services to query and acknowledge, history file with rotation | Done |
+| 3 | The adapter reports its own health, lists raised faults in `state.errors` and holds the vehicle on a critical fault | Done |
+| 4 | Flight recorder: a rosbag2 bag of the seconds before and after a fault | Done |
+| 5 | Web API (REST and server-sent events) and a status page | Done |
+
+Possible next steps here:
+
+- Monitors for real hardware (scan rate, battery, motor drivers), or a generic
+  "topic rate" monitor configured by parameter
+- List and download captures through the web API
+- TLS, user accounts and an audit trail for the web API
+- Unit tests for the ROS code of `fault_manager` and `fault_gateway`
+- Make the fault manager a lifecycle node
 
 ## Next steps for the bridge, in order
 

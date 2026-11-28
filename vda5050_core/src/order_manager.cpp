@@ -268,7 +268,7 @@ void OrderManager::advance()
 
 void OrderManager::advance_once()
 {
-  if (order_id_.empty() || paused_ || cancelling_ || driving_ || halted_) {
+  if (order_id_.empty() || paused_ || hold_ || cancelling_ || driving_ || halted_) {
     return;
   }
 
@@ -469,7 +469,7 @@ void OrderManager::handle_instant_action(const Action & action)
   } else if (type == "startPause") {
     if (!paused_) {
       paused_ = true;
-      if (driving_) {
+      if (driving_ && !hold_) {  // if held, navigation is paused already
         navigation_.pause();
       }
     }
@@ -477,7 +477,7 @@ void OrderManager::handle_instant_action(const Action & action)
   } else if (type == "stopPause") {
     if (paused_) {
       paused_ = false;
-      if (driving_) {
+      if (driving_ && !hold_) {  // a hold outlasts master control's stopPause
         navigation_.resume();
       }
     }
@@ -590,6 +590,25 @@ bool same_errors(const std::vector<Error> & a, const std::vector<Error> & b)
 
 }  // namespace
 
+void OrderManager::set_hold(bool hold)
+{
+  if (hold == hold_) {
+    return;
+  }
+  hold_ = hold;
+  state_changed_ = true;
+  if (driving_ && !paused_ && !cancelling_) {
+    if (hold_) {
+      navigation_.pause();
+    } else {
+      navigation_.resume();
+    }
+  }
+  if (!hold_) {
+    advance();  // start whatever was waiting for the hold to end
+  }
+}
+
 void OrderManager::set_external_errors(std::vector<Error> errors)
 {
   if (same_errors(errors, external_errors_)) {
@@ -623,8 +642,8 @@ State OrderManager::snapshot() const
 
   state.agv_position = position_;
   state.velocity = velocity_;
-  state.driving = driving_ && !paused_;
-  state.paused = paused_;
+  state.driving = driving_ && !paused_ && !hold_;
+  state.paused = paused_ || hold_;
   // Ask for more base when a horizon exists and at most one released node is left.
   state.new_base_request =
     !nodes_.empty() && !nodes_.back().released && released_ahead <= 1;

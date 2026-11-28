@@ -35,6 +35,8 @@ a physical robot.
 | Publisher | `~/action_request` | `std_msgs/msg/String` (JSON) | out |
 | Publisher | `~/action_cancel` | `std_msgs/msg/String` (actionId) | out |
 | Subscription | `~/action_status` | `std_msgs/msg/String` (JSON) | in |
+| Publisher | `faults/report` | `fault_msgs/msg/FaultReport` | out |
+| Subscription | `faults/active` | `fault_msgs/msg/FaultArray` | in |
 
 MQTT topics, under `<interface_name>/v<major>/<manufacturer>/<serial_number>/`:
 subscribes to `order` and `instantActions`; publishes `state`, `connection`,
@@ -52,6 +54,27 @@ The adapter does not know how your robot picks or charges. For every action in
 ```
 
 `status` is one of `RUNNING`, `PAUSED`, `FINISHED`, `FAILED`.
+
+### Faults
+
+With parameter `faults.enabled` (default true) the adapter works together
+with the `fault_manager` package; see
+[docs/fault_management.md](../docs/fault_management.md).
+
+- Once a second it reports its own health on `faults/report`:
+  `BRIDGE-MQTT-001` (no broker connection), `BRIDGE-NAV-001` (Nav2 action
+  server not available), `BRIDGE-LOC-001` (no transform from `global_frame` to
+  `base_frame`).
+- Faults listed on `faults/active` are put into `errors` of the VDA 5050
+  state. `CRITICAL` becomes `FATAL`; `ERROR` and `WARNING` become `WARNING`;
+  `INFO` is not sent.
+- While a `FATAL` one is raised the vehicle is held: driving is paused and
+  `paused` is true in the state (`faults.hold_on_fatal`, default true). This is
+  not a safety function.
+- If `faults/active` falls silent for `faults.timeout_s`, a warning
+  `faultManagerTimeout` is added to `errors`.
+
+Without a fault manager running, none of this changes the adapter's behaviour.
 
 ## Parameters
 

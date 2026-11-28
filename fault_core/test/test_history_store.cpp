@@ -26,8 +26,13 @@ public:
   : path_((std::filesystem::temp_directory_path() / ("fault_core_" + name + ".jsonl")).string())
   {
     std::remove(path_.c_str());
+    std::remove((path_ + ".1").c_str());
   }
-  ~TempFile() {std::remove(path_.c_str());}
+  ~TempFile()
+  {
+    std::remove(path_.c_str());
+    std::remove((path_ + ".1").c_str());
+  }
   const std::string & path() const {return path_;}
 
 private:
@@ -147,4 +152,44 @@ TEST(HistoryStore, HistorySurvivesARestartOfTheManager)
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].sequence, 4u);
   EXPECT_EQ(events[0].occurrence_count, 3u);
+}
+
+TEST(HistoryStore, RotatesWhenTheFileGrowsPastItsLimit)
+{
+  TempFile file("rotate");
+  JsonlHistoryStore store(file.path(), 600);  // one event is about 190 bytes
+
+  for (std::uint64_t i = 1; i <= 4; ++i) {
+    EXPECT_TRUE(store.append({event(i, "A", EventType::Activated)}));
+  }
+  // The fourth append crossed the limit: everything so far is now in ".1".
+  EXPECT_TRUE(std::filesystem::exists(store.rotated_path()));
+  EXPECT_FALSE(std::filesystem::exists(file.path()));
+
+  store.append({event(5, "A", EventType::Cleared)});
+  const LoadResult both = store.load();
+  ASSERT_EQ(both.events.size(), 5u);  // rotated file first, then the current one
+  EXPECT_EQ(both.events.front().sequence, 1u);
+  EXPECT_EQ(both.events.back().sequence, 5u);
+
+  // A second rotation replaces the first rotated file: the oldest events go.
+  for (std::uint64_t i = 6; i <= 9; ++i) {
+    store.append({event(i, "A", EventType::Activated)});
+  }
+  const LoadResult after = store.load();
+  ASSERT_FALSE(after.events.empty());
+  EXPECT_EQ(after.events.front().sequence, 5u);
+  EXPECT_EQ(after.events.back().sequence, 9u);
+  EXPECT_LT(std::filesystem::file_size(store.rotated_path()), 1200u);
+}
+
+TEST(HistoryStore, WithoutALimitTheFileIsNeverRotated)
+{
+  TempFile file("norotate");
+  JsonlHistoryStore store(file.path());
+  for (std::uint64_t i = 1; i <= 20; ++i) {
+    store.append({event(i, "A", EventType::Activated)});
+  }
+  EXPECT_FALSE(std::filesystem::exists(store.rotated_path()));
+  EXPECT_EQ(store.load().events.size(), 20u);
 }

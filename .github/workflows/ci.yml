@@ -73,6 +73,12 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/integration_test.sh
+      - name: Fault management system test (fault manager, adapter, web API, rosbag2)
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          python3 src/vda5050_bridge/fault_manager/test/fault_system_test.py
 
   nav2-simulation:
     name: Real Nav2 with simulated robot
