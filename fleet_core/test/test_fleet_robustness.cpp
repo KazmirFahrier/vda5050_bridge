@@ -548,8 +548,8 @@ TEST(FleetNetwork, ALostOrderIsSentAgain)
   ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 60.0));
   EXPECT_EQ(world.fleet().stats().orders_resent, 1u);
   EXPECT_EQ(world.fleet().stats().tasks_finished, 1u);
-  // The same order twice, word for word apart from nothing at all.
-  ASSERT_TRUE(world.orders().size() >= 2u);
+  // The same order twice, word for word.
+  ASSERT_GE(world.orders().size(), 2u);
   EXPECT_EQ(world.orders()[0].order_id, world.orders()[1].order_id);
   EXPECT_EQ(world.orders()[0].order_update_id, world.orders()[1].order_update_id);
   EXPECT_EQ(world.orders()[0].header.header_id, world.orders()[1].header.header_id);

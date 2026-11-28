@@ -307,6 +307,8 @@ TEST(CodecMaster, MalformedStateNamesTheField)
   EXPECT_TRUE(contains(error_of("\"nodeStates\":[", "\"nodeStatez\":["), "nodeStates"));
   EXPECT_TRUE(contains(error_of("\"referenceKey\":\"topic\"", "\"referenceKey\":5"),
     "errorReferences[1]"));
+  EXPECT_TRUE(contains(error_of("\"errorReferences\":[", "\"errorReferences\":7,\"x\":["),
+    "errorReferences"));
   EXPECT_THROW(decode_state("not json"), DecodeError);
   EXPECT_THROW(decode_state("[]"), DecodeError);
 }

@@ -300,7 +300,8 @@ public:
   std::size_t messages_to_vehicles() const {return messages_to_vehicles_;}
 
 private:
-  void post(std::deque<Envelope> & queue, const std::string & topic,
+  void post(
+    std::deque<Envelope> & queue, const std::string & topic,
     const std::string & payload, bool lossy)
   {
     const auto unit = [this] {

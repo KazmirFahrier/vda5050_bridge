@@ -99,18 +99,18 @@ Measured in CI with `gcovr` over the unit tests only (not the example program):
 
 | File | Lines | Covered |
 |---|---|---|
-| `codec.cpp` | 388 | 97 % |
+| `codec.cpp` | 610 | 97 % |
 | `header.cpp` | 29 | 96 % |
 | `json.cpp` | 274 | 99 % |
-| `order_manager.cpp` | 392 | 99 % |
+| `order_manager.cpp` | 419 | 99 % |
 | `order_validator.cpp` | 59 | 100 % |
 | `session.cpp` | 102 | 100 % |
-| **Total** | 1244 | **98.8 %** |
+| **Total** | 1493 | **98.8 %** |
 
-All 125 functions are executed. Of the 15 uncovered lines, 14 cannot be
-reached (closing braces after code that always throws or returns, and
-fall-through returns after exhaustive `switch` statements) and one is a
-defensive guard against the same action id arriving twice. The job fails
+Of the uncovered lines, all but one cannot be reached (closing braces after
+code that always throws or returns, and fall-through returns after
+exhaustive `switch` statements); that one is a defensive guard against the
+same action id arriving twice. The job fails
 below 95 %.
 
 Branch coverage reads 62 %. That figure is not meaningful for C++ compiled
@@ -122,14 +122,21 @@ untested behaviour, and tests were added for it: a cancel that completes
 because the leg finished first, a second cancel during a cancel, an
 unsupported action on an edge, every JSON escape, and wrong types in messages.
 
-The table above was measured before the master control side of the codec
-was added (eight more tests, about 250 more lines in `codec.cpp`); the total
-is unchanged at 98.8 %.
-
 `fault_core` and `fleet_core` are measured the same way, with the same 95 %
-threshold. `fleet_core`: 97 %. Its uncovered lines are mostly the handling of
-a plan that fails the check, which no test can provoke, and fall-through
-returns.
+threshold: 98.1 % (457 of 466 lines) and 97.4 % (2090 of 2146).
+
+| File of `fleet_core` | Lines | Covered |
+|---|---|---|
+| `api.cpp` | 188 | 99 % |
+| `conflicts.cpp` | 56 | 100 % |
+| `fleet_manager.cpp` | 936 | 97 % |
+| `planner.cpp` | 814 | 96 % |
+| `reservations.cpp` | 26 | 100 % |
+| `roadmap.cpp` | 126 | 100 % |
+
+Its uncovered lines are the handling of a plan that fails the check (which
+no test can provoke), a few defensive branches in the planner's stages, and
+fall-through returns.
 
 The adapter, the ROS nodes and the two programs of `vda5050_fleet` have no
 unit tests and no coverage figure.

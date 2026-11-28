@@ -166,16 +166,20 @@ TEST(FleetApi, EveryMalformedCommandIsRefusedWithAReason)
     "must not be empty");
   refused(
     R"({"command":"submit","stops":[{"node":"B","actions":[
-        {"actionType":"pick","blockingType":"MAYBE"}]}]})", "NONE, SOFT or HARD");
+        {"actionType":"pick","blockingType":"MAYBE"}]}]})",
+    "NONE, SOFT or HARD");
   refused(
     R"({"command":"submit","stops":[{"node":"B","actions":[
-        {"actionType":"pick","actionParameters":{}}]}]})", "'actionParameters' must be");
+        {"actionType":"pick","actionParameters":{}}]}]})",
+    "'actionParameters' must be");
   refused(
     R"({"command":"submit","stops":[{"node":"B","actions":[
-        {"actionType":"pick","actionParameters":[1]}]}]})", "parameter must be an object");
+        {"actionType":"pick","actionParameters":[1]}]}]})",
+    "parameter must be an object");
   refused(
     R"({"command":"submit","stops":[{"node":"B","actions":[
-        {"actionType":"pick","actionParameters":[{"key":"k"}]}]}]})", "'value' is missing");
+        {"actionType":"pick","actionParameters":[{"key":"k"}]}]}]})",
+    "'value' is missing");
   refused(R"({"command":"cancel"})", "'taskId' is missing");
   refused(R"({"command":"cancel","taskId":"one"})", "'taskId' must be a number");
   refused(R"({"command":"cancel","taskId":-3})", "out of range");

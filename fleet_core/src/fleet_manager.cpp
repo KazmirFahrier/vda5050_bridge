@@ -808,6 +808,9 @@ void FleetManager::update_availability(Vehicle & vehicle, TimePoint now)
 {
   std::string reason;
   const State & state = vehicle.state;
+  const bool automatic =
+    state.operating_mode == vda5050_core::OperatingMode::Automatic ||
+    state.operating_mode == vda5050_core::OperatingMode::Semiautomatic;
   if (!vehicle.has_state) {
     reason = "no state received yet";
   } else if (!vehicle.online) {
@@ -822,9 +825,7 @@ void FleetManager::update_availability(Vehicle & vehicle, TimePoint now)
     reason = "not at a node of the roadmap";
   } else if (vehicle.needs_resync) {
     reason = "being brought to a halt";
-  } else if (state.operating_mode != vda5050_core::OperatingMode::Automatic &&
-    state.operating_mode != vda5050_core::OperatingMode::Semiautomatic)
-  {
+  } else if (!automatic) {
     reason = std::string("operating mode ") + vda5050_core::to_string(state.operating_mode);
   } else if (state.paused) {
     reason = "paused";
