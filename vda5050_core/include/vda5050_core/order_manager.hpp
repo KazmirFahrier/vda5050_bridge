@@ -80,6 +80,13 @@ public:
   void set_operating_mode(OperatingMode mode);
   void set_safety_state(const SafetyState & safety);
 
+  /// Replace the set of errors that come from outside the order logic, such as
+  /// hardware or software faults found by a fault manager. They are reported in
+  /// State.errors after the order manager's own errors and, unlike those, are
+  /// not cleared when a new order arrives: they last until the caller removes
+  /// them. A state update is requested only if the set really changed.
+  void set_external_errors(std::vector<Error> errors);
+
   // ---- outputs ------------------------------------------------------------
 
   /// The current vehicle state. The header is left empty for the caller to stamp.
@@ -163,6 +170,7 @@ private:
   OperatingMode operating_mode_{OperatingMode::Automatic};
   SafetyState safety_;
   std::vector<Error> errors_;
+  std::vector<Error> external_errors_;
 
   bool state_changed_{false};
   bool factsheet_requested_{false};

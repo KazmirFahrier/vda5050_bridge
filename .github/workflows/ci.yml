@@ -28,6 +28,17 @@ jobs:
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Configure fault_core
+        run: >
+          cmake -S fault_core -B build_fault -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_CXX_FLAGS=-Werror
+          -DFAULT_CORE_SANITIZE=ON
+      - name: Build fault_core
+        run: cmake --build build_fault
+      - name: Test fault_core
+        run: ctest --test-dir build_fault --output-on-failure
 
   ros2:
     name: ROS 2 Jazzy (colcon)
@@ -148,7 +159,7 @@ jobs:
           schemas-2.0.0/json_schemas schemas-2.1.0/json_schemas
 
   coverage:
-    name: Test coverage of vda5050_core
+    name: Test coverage of vda5050_core and fault_core
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -165,6 +176,17 @@ jobs:
           gcovr --root . --filter 'vda5050_core/src/'
           --print-summary --fail-under-line 95
           build/CMakeFiles/vda5050_core.dir
+      - name: Build fault_core with coverage instrumentation
+        run: |
+          cmake -S fault_core -B build_fault -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0"
+          cmake --build build_fault
+      - name: Run the fault_core unit tests
+        run: ./build_fault/fault_core_tests
+      - name: Report for fault_core (fails below 95 % line coverage)
+        run: >
+          gcovr --root . --filter 'fault_core/src/'
+          --print-summary --fail-under-line 95
+          build_fault/CMakeFiles/fault_core.dir
 
   fuzz:
     name: Fuzz the JSON parser and decoders (60 s)
