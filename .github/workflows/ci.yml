@@ -39,6 +39,17 @@ jobs:
         run: cmake --build build_fault
       - name: Test fault_core
         run: ctest --test-dir build_fault --output-on-failure
+      - name: Configure fleet_core
+        run: >
+          cmake -S fleet_core -B build_fleet -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_CXX_FLAGS=-Werror
+          -DFLEET_CORE_SANITIZE=ON
+      - name: Build fleet_core
+        run: cmake --build build_fleet
+      - name: Test fleet_core (planner, fleet manager, simulated fleets)
+        run: ctest --test-dir build_fleet --output-on-failure --timeout 900
 
   ros2:
     name: ROS 2 Jazzy (colcon)
@@ -165,7 +176,7 @@ jobs:
           schemas-2.0.0/json_schemas schemas-2.1.0/json_schemas
 
   coverage:
-    name: Test coverage of vda5050_core and fault_core
+    name: Test coverage of vda5050_core, fault_core and fleet_core
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -193,6 +204,17 @@ jobs:
           gcovr --root . --filter 'fault_core/src/'
           --print-summary --fail-under-line 95
           build_fault/CMakeFiles/fault_core.dir
+      - name: Build fleet_core with coverage instrumentation
+        run: |
+          cmake -S fleet_core -B build_fleet -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0"
+          cmake --build build_fleet
+      - name: Run the fleet_core unit tests
+        run: ./build_fleet/fleet_core_tests
+      - name: Report for fleet_core (fails below 95 % line coverage)
+        run: >
+          gcovr --root . --filter 'fleet_core/src/'
+          --print-summary --fail-under-line 95
+          build_fleet/CMakeFiles/fleet_core.dir
 
   fuzz:
     name: Fuzz the JSON parser and decoders (60 s)

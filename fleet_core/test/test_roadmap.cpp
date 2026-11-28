@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include <string>
 
 #include "fleet_core/conflicts.hpp"
@@ -197,4 +199,58 @@ TEST(Conflicts, CrossingAndTooCloseParallelEdgesAreFoundFromGeometry)
   const ConflictTable narrow(map, 0.5);
   EXPECT_FALSE(narrow.conflict(edge("WE"), edge("PQ")));
   EXPECT_TRUE(narrow.conflict(edge("WE"), edge("SN")));
+}
+
+// ------------------------------------------------------------ bad input ----
+
+namespace
+{
+
+template<typename Action>
+std::string error_of(Action action)
+{
+  try {
+    action();
+  } catch (const fleet_core::RoadmapError & error) {
+    return error.what();
+  }
+  return "";
+}
+
+}  // namespace
+
+TEST(RoadmapErrors, EveryMistakeIsNamed)
+{
+  using fleet_core::Roadmap;
+  Roadmap map;
+  map.add_node("A", 0.0, 0.0);
+  map.add_node("B", 1.0, 0.0);
+  EXPECT_NE(error_of([&] {map.add_node("", 0.0, 0.0);}).find("id must not be empty"),
+    std::string::npos);
+  EXPECT_NE(
+    error_of([&] {map.add_node("N", std::numeric_limits<double>::infinity(), 0.0);})
+    .find("finite"), std::string::npos);
+  EXPECT_NE(error_of([&] {map.add_edge("", "A", "B");}).find("id must not be empty"),
+    std::string::npos);
+  EXPECT_NE(error_of([&] {map.add_edge("AX", "A", "X");}).find("unknown node 'X'"),
+    std::string::npos);
+  EXPECT_NE(error_of([&] {map.add_edge("XA", "X", "A");}).find("unknown node 'X'"),
+    std::string::npos);
+
+  EXPECT_NE(error_of([] {Roadmap::from_json(R"({"mapId":7,"nodes":[],"edges":[]})");})
+    .find("mapId"), std::string::npos);
+  EXPECT_NE(error_of([] {Roadmap::from_json(R"({"nodes":[1],"edges":[]})");})
+    .find("expected an object"), std::string::npos);
+  EXPECT_NE(
+    error_of(
+      [] {
+        Roadmap::from_json(R"({"nodes":[{"id":"A","x":0,"y":0}],"edges":["e"]})");
+      }).find("expected an object"), std::string::npos);
+}
+
+TEST(RoadmapErrors, AResourceThatDoesNotExistHasAPlaceholderName)
+{
+  const fleet_core::Roadmap map = test_maps::corridor();
+  EXPECT_EQ(map.resource_name(-1), "?");
+  EXPECT_EQ(map.resource_name(100000), "?");
 }

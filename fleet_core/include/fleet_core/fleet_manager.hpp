@@ -227,6 +227,7 @@ private:
   void on_state(Vehicle & vehicle, const vda5050_core::State & state, TimePoint now);
   void on_connection(Vehicle & vehicle, vda5050_core::ConnectionState state, TimePoint now);
   void locate(Vehicle & vehicle, TimePoint now);
+  bool adopt_on_edge(Vehicle & vehicle, TimePoint now);
   void place(Vehicle & vehicle, int node, TimePoint now);
   void track_progress(Vehicle & vehicle, TimePoint now);
   void track_task(Vehicle & vehicle, TimePoint now);

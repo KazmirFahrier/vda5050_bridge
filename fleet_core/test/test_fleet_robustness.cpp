@@ -287,6 +287,231 @@ TEST(FleetDiscovery, VehiclesSwitchedOnTooCloseToEachOtherAreNotMovedButOthersAr
   EXPECT_EQ(world.fleet().stats().invalid_plans, 0u);
 }
 
+TEST(FleetDiscovery, AVehicleBusyWithSomebodyElsesOrderIsStoppedBeforeItIsUsed)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A");
+  // An order from an earlier life of the system: drive A > B > C.
+  vda5050_core::Order foreign;
+  foreign.header.header_id = 1;
+  foreign.header.timestamp = "2026-01-01T00:00:00.000Z";
+  foreign.header.version = "2.0.0";
+  foreign.header.manufacturer = "sim";
+  foreign.header.serial_number = "v1";
+  foreign.order_id = "left-over";
+  const char * names[] = {"A", "B", "C"};
+  for (std::uint32_t k = 0; k < 3; ++k) {
+    vda5050_core::Node node;
+    node.node_id = names[k];
+    node.sequence_id = 2 * k;
+    node.released = true;
+    vda5050_core::NodePosition position;
+    position.x = 2.0 * k;
+    position.y = 0.0;
+    position.map_id = "map";
+    node.node_position = position;
+    foreign.nodes.push_back(node);
+    if (k > 0) {
+      vda5050_core::Edge edge;
+      edge.edge_id = std::string(names[k - 1]) + names[k];
+      edge.sequence_id = 2 * k - 1;
+      edge.released = true;
+      edge.start_node_id = names[k - 1];
+      edge.end_node_id = names[k];
+      foreign.edges.push_back(edge);
+    }
+  }
+  vehicle.deliver("uagv/v2/sim/v1/order", vda5050_core::encode_order(foreign));
+  world.step();
+  EXPECT_TRUE(vehicle.moving());
+  world.run_for(1.0);
+  EXPECT_TRUE(log.saw("vehicle_resync", "v1"));
+  EXPECT_FALSE(vehicle.moving());
+  EXPECT_LT(vehicle.x(), 0.5);  // stopped within a fraction of a second
+
+  // It is stopped, sent on to the next node, and then takes tasks as usual.
+  const TaskId task = *world.fleet().submit(go_to("E"), world.now());
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 120.0));
+  EXPECT_TRUE(world.fleet().task(task)->state == TaskState::Finished);
+  EXPECT_NE(world.orders().front().order_id, "left-over");
+  expect_clean(world);
+}
+
+TEST(FleetDiscovery, AVehicleThatIsNotOnTheRoadmapIsLeftAloneUntilItIs)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & lost = world.add_vehicle("v1", "A", false);
+  lost.set_position(1.0, 1.5);  // next to the corridor, at no node
+  world.run_for(0.1);
+  lost.connect(world.now());
+  world.run_for(1.0);
+  EXPECT_EQ(view_of(world, "v1").node, "");
+  EXPECT_FALSE(view_of(world, "v1").available);
+  EXPECT_EQ(view_of(world, "v1").unavailable_reason, "not at a node of the roadmap");
+  const TaskId task = *world.fleet().submit(go_to("C"), world.now());
+  world.run_for(5.0);
+  EXPECT_TRUE(world.fleet().task(task)->state == TaskState::Queued);
+
+  lost.set_position(2.0, 0.1);  // somebody drives it to B, near enough
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 60.0));
+  EXPECT_EQ(view_of(world, "v1").node, "C");
+  expect_clean(world);
+}
+
+TEST(FleetDiscovery, AVehicleFoundBetweenTwoNodesIsSentOnToTheNextOne)
+{
+  // The fleet manager starts while a vehicle stands in the middle of an
+  // edge, between B and C, a little nearer to C.
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A", false);
+  vehicle.set_position(3.2, 0.0);
+  world.run_for(0.1);
+  vehicle.connect(world.now());
+  world.run_for(0.2);
+  EXPECT_TRUE(log.saw("vehicle_recovering", "v1"));
+  // Meanwhile it holds the whole edge and both its ends.
+  EXPECT_EQ(view_of(world, "v1").claimed.size(), 3u);
+  ASSERT_TRUE(
+    world.run_until(
+      [&] {return view_of(world, "v1").node == "C" && !vehicle.moving();}, 20.0));
+  EXPECT_NEAR(vehicle.x(), 4.0, 1e-9);
+  EXPECT_NEAR(vehicle.distance_driven(), 0.8, 1e-6);
+  world.fleet().submit(go_to("A"), world.now());
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 60.0));
+  EXPECT_EQ(view_of(world, "v1").node, "A");
+  expect_clean(world);
+}
+
+TEST(FleetDiscovery, AVehicleFoundOnAnEdgeThatSomebodyElseHoldsWaits)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  world.add_vehicle("v1", "C");
+  world.run_for(1.0);
+  sim::SimVehicle & late = world.add_vehicle("v2", "A", false);
+  late.set_position(3.0, 0.0);  // on the edge B-C, whose end C is taken
+  world.run_for(0.1);
+  late.connect(world.now());
+  world.run_for(15.0);
+  EXPECT_FALSE(log.saw("vehicle_recovering", "v2"));
+  EXPECT_EQ(view_of(world, "v2").node, "");
+  EXPECT_FALSE(late.moving());
+
+  // The other one is sent away; now the edge can be given to the newcomer.
+  world.fleet().submit(go_to("E", "v1"), world.now());
+  ASSERT_TRUE(
+    world.run_until(
+      [&] {return !view_of(world, "v2").node.empty() && !late.moving();}, 60.0));
+  EXPECT_TRUE(log.saw("vehicle_recovering", "v2"));
+  EXPECT_GE(world.closest_approach(), 1.0 - 1e-9);
+}
+
+TEST(FleetDiscovery, AVehicleStoppedAwayFromTheRoadmapWaitsToBePutBack)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A");
+  world.run_for(1.0);
+  const TaskId task = *world.fleet().submit(go_to("E"), world.now());
+  world.run_for(2.0);
+  ASSERT_TRUE(vehicle.moving());
+  // Stopped by hand and pushed aside, 1.5 m off the edge it was on.
+  world.fleet().cancel(task, world.now());
+  vehicle.set_position(vehicle.x(), 1.5);
+  world.run_for(3.0);
+  EXPECT_TRUE(log.saw("vehicle_off_road", "v1"));
+  EXPECT_FALSE(view_of(world, "v1").available);
+  EXPECT_EQ(view_of(world, "v1").unavailable_reason, "stopped away from the roadmap");
+  // It still counts as being where it was last known to be: nothing else is
+  // let through there.
+  EXPECT_FALSE(view_of(world, "v1").claimed.empty());
+
+  vehicle.set_position(4.0, 0.0);  // put back, on node C
+  ASSERT_TRUE(world.run_until([&] {return view_of(world, "v1").available;}, 20.0));
+  EXPECT_EQ(view_of(world, "v1").node, "C");
+  EXPECT_EQ(view_of(world, "v1").claimed.size(), 1u);
+  world.fleet().submit(go_to("A"), world.now());
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 60.0));
+  EXPECT_EQ(view_of(world, "v1").node, "A");
+}
+
+TEST(FleetDiscovery, AVehicleInManualModeIsNotGivenOrders)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A");
+  vehicle.session().orders().set_operating_mode(vda5050_core::OperatingMode::Manual);
+  world.run_for(1.0);
+  EXPECT_FALSE(view_of(world, "v1").available);
+  EXPECT_EQ(view_of(world, "v1").unavailable_reason, "operating mode MANUAL");
+  const TaskId task = *world.fleet().submit(go_to("B"), world.now());
+  world.run_for(5.0);
+  EXPECT_TRUE(world.orders().empty());
+  vehicle.session().orders().set_operating_mode(vda5050_core::OperatingMode::Automatic);
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 60.0));
+  EXPECT_TRUE(world.fleet().task(task)->state == TaskState::Finished);
+  expect_clean(world);
+}
+
+TEST(FleetDiscovery, AVehicleThatForgetsItsOrderIsBroughtBackIntoStep)
+{
+  // The vehicle's computer restarts under way: it reports no order at all,
+  // although it was given one. (Here the report is made up; the simulated
+  // vehicle itself drives on, and is stopped.)
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A");
+  world.run_for(1.0);
+  const TaskId task = *world.fleet().submit(go_to("E"), world.now());
+  world.run_for(1.5);
+  vda5050_core::State blank = vehicle.session().orders().snapshot();
+  blank.header.header_id = 9999;
+  blank.header.manufacturer = "sim";
+  blank.header.serial_number = "v1";
+  blank.header.version = "2.0.0";
+  blank.header.timestamp = "2026-01-01T00:00:00.000Z";
+  blank.order_id = "";
+  blank.order_update_id = 0;
+  blank.node_states.clear();
+  blank.edge_states.clear();
+  blank.driving = false;
+  world.fleet().on_message(
+    "uagv/v2/sim/v1/state", vda5050_core::encode_state(blank), world.now());
+  EXPECT_TRUE(log.saw("order_lost", "v1"));
+  EXPECT_TRUE(log.saw("vehicle_resync", "v1"));
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 120.0));
+  EXPECT_TRUE(world.fleet().task(task)->state == TaskState::Finished);
+  expect_clean(world);
+}
+
+TEST(FleetDiscovery, AVehicleThatStopsShortOfItsOrderIsNoticed)
+{
+  sim::World world(test_maps::corridor(), fleet_config());
+  EventLog log(world);
+  sim::SimVehicle & vehicle = world.add_vehicle("v1", "A");
+  world.run_for(1.0);
+  const TaskId task = *world.fleet().submit(go_to("E"), world.now());
+  world.run_for(1.5);
+  // It claims to be done with the order while it has not passed a single node.
+  vda5050_core::State early = vehicle.session().orders().snapshot();
+  early.header.header_id = 9999;
+  early.header.manufacturer = "sim";
+  early.header.serial_number = "v1";
+  early.header.version = "2.0.0";
+  early.header.timestamp = "2026-01-01T00:00:00.000Z";
+  early.node_states.clear();
+  early.edge_states.clear();
+  early.driving = false;
+  world.fleet().on_message(
+    "uagv/v2/sim/v1/state", vda5050_core::encode_state(early), world.now());
+  EXPECT_TRUE(log.saw("order_abandoned", "v1"));
+  ASSERT_TRUE(world.run_until([&] {return world.all_tasks_over();}, 120.0));
+  EXPECT_TRUE(world.fleet().task(task)->state == TaskState::Finished);
+  expect_clean(world);
+}
+
 // ------------------------------------------------------------ the network ----
 
 TEST(FleetNetwork, LostMessagesAreMadeUpFor)

@@ -74,7 +74,8 @@ if(BUILD_TESTING)
     ament_lint_auto_find_test_dependencies()
 
     find_package(ament_cmake_gtest REQUIRED)
-    ament_add_gtest(${PROJECT_NAME}_tests ${TEST_SOURCES})
+    # The simulated fleets take a while in an unoptimised build.
+    ament_add_gtest(${PROJECT_NAME}_tests ${TEST_SOURCES} TIMEOUT 600)
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME})
   else()
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})

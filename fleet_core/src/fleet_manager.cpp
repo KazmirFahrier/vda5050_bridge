@@ -118,7 +118,8 @@ struct FleetManager::Task
 
 struct FleetManager::Vehicle
 {
-  Vehicle(int index_in, vda5050_core::Identity identity_in, vda5050_core::HeaderFactory::Clock clock)
+  Vehicle(
+    int index_in, vda5050_core::Identity identity_in, vda5050_core::HeaderFactory::Clock clock)
   : index(index_in), identity(identity_in), headers(std::move(identity_in), std::move(clock)) {}
 
   int index;
@@ -418,9 +419,11 @@ void FleetManager::finish_resynchronization(Vehicle & vehicle, TimePoint now)
     vehicle.committed.push_back(rest);
   } else {
     vehicle.node = -1;
-    event(
-      now, "vehicle_not_on_map", vehicle.identity.serial_number,
-      "came to rest away from every node");
+    if (!adopt_on_edge(vehicle, now)) {
+      event(
+        now, "vehicle_not_on_map", vehicle.identity.serial_number,
+        "came to rest away from every node");
+    }
   }
 
   if (Task * task = find_task(vehicle.task)) {
@@ -453,7 +456,74 @@ void FleetManager::locate(Vehicle & vehicle, TimePoint now)
   }
   if (where && *where != vehicle.node) {
     place(vehicle, *where, now);
+  } else if (!where && vehicle.node < 0 && clean_idle(state)) {
+    adopt_on_edge(vehicle, now);
   }
+}
+
+bool FleetManager::adopt_on_edge(Vehicle & vehicle, TimePoint now)
+{
+  // A vehicle that stands between two nodes, and of which nothing else is
+  // known: the fleet manager was started while it was under way, or it was
+  // stopped there by something else. If it is on an edge, it is given that
+  // edge and both its ends and is sent on to the end, like a vehicle that
+  // this fleet manager stopped itself. If any of that is somebody else's
+  // already, it has to wait where it is.
+  const State & state = vehicle.state;
+  if (!state.agv_position || !state.agv_position->position_initialized) {
+    return false;
+  }
+  const double x = state.agv_position->x;
+  const double y = state.agv_position->y;
+  int best = -1;
+  double best_to_go = 0.0;
+  for (int index = 0; index < roadmap_.edge_count(); ++index) {
+    const MapEdge & edge = roadmap_.edge(index);
+    const MapNode & from = roadmap_.node(edge.from);
+    const MapNode & to = roadmap_.node(edge.to);
+    if (segment_distance(x, y, x, y, from.x, from.y, to.x, to.y) > config_.attach_tolerance) {
+      continue;
+    }
+    const double to_go = std::hypot(to.x - x, to.y - y);
+    if (best < 0 || to_go < best_to_go) {
+      best = index;  // of the two directions of a road, the shorter way out
+      best_to_go = to_go;
+    }
+  }
+  if (best < 0) {
+    return false;
+  }
+  const MapEdge & edge = roadmap_.edge(best);
+  const std::vector<ResourceId> wanted{
+    roadmap_.node_resource(edge.from), roadmap_.edge_resource(best),
+    roadmap_.node_resource(edge.to)};
+  for (const std::unique_ptr<Vehicle> & other : vehicles_) {
+    if (other.get() == &vehicle || other->node < 0) {
+      continue;
+    }
+    for (const ResourceId held : claimed(*other)) {
+      for (const ResourceId resource : wanted) {
+        if (conflicts_.conflict(held, resource)) {
+          return false;
+        }
+      }
+    }
+  }
+  vehicle.node = edge.from;
+  GrantedMove rest;
+  rest.edge = best;
+  rest.from = edge.from;
+  rest.to = edge.to;
+  rest.sequence_to = 2;
+  vehicle.committed.clear();
+  vehicle.committed.push_back(rest);
+  vehicle.journey_open = false;
+  vehicle.recovery_deviation = edge.length + config_.attach_tolerance;
+  plan_dirty_ = true;
+  event(
+    now, "vehicle_recovering", vehicle.identity.serial_number,
+    "found on edge " + edge.id + "; sent on to its end");
+  return true;
 }
 
 void FleetManager::place(Vehicle & vehicle, int node, TimePoint now)
