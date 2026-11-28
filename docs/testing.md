@@ -5,7 +5,7 @@
 | What | Result | Where it runs |
 |---|---|---|
 | `vda5050_core` unit tests | 110 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
-| `fault_core` unit tests | 52 tests, above 95 % line coverage (enforced in CI) | Same as above |
+| `fault_core` unit tests | 52 tests, 98.5 % line coverage | Same as above |
 | Conformance to the official JSON schemas | All published messages and all example inputs conform to versions 2.0.0 and 2.1.0, with one documented deviation | GitHub Actions; schemas cloned from the official repository at fixed tags |
 | ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all three packages | `colcon test` |
 | Fuzzing of the JSON parser and decoders | 60 s per CI run (about 235,000 inputs), no findings | GitHub Actions, libFuzzer with ASan and UBSan |

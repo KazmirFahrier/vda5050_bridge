@@ -33,11 +33,11 @@ FaultRecord record(const std::string & code, Severity severity, FaultState state
 TEST(Vda5050Mapping, MapsSeverityToTheTwoVda5050Levels)
 {
   const auto errors = to_vda5050_errors(
-    {
-      record("C", Severity::Critical, FaultState::Active),
-      record("E", Severity::Error, FaultState::Active),
-      record("W", Severity::Warning, FaultState::Healing),
-      record("I", Severity::Info, FaultState::Active),
+  {
+    record("C", Severity::Critical, FaultState::Active),
+    record("E", Severity::Error, FaultState::Active),
+    record("W", Severity::Warning, FaultState::Healing),
+    record("I", Severity::Info, FaultState::Active),
     });
   ASSERT_EQ(errors.size(), 3u);  // INFO is not sent to master control by default
   EXPECT_EQ(errors[0].error_type, "C");

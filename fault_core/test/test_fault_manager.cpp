@@ -45,13 +45,13 @@ protected:
   FaultCatalog catalog()
   {
     return FaultCatalog(
-      {
-        definition("INSTANT", Severity::Warning),
-        definition("DEBOUNCED", Severity::Error, 500, 2000),
-        definition("LATCHED", Severity::Critical, 0, 0, true),
-        definition("LATCHED-SLOW", Severity::Critical, 0, 1000, true),
-        definition("WATCHED", Severity::Error, 0, 0, false, 3000),
-        definition("INFO", Severity::Info),
+    {
+      definition("INSTANT", Severity::Warning),
+      definition("DEBOUNCED", Severity::Error, 500, 2000),
+      definition("LATCHED", Severity::Critical, 0, 0, true),
+      definition("LATCHED-SLOW", Severity::Critical, 0, 1000, true),
+      definition("WATCHED", Severity::Error, 0, 0, false, 3000),
+      definition("INFO", Severity::Info),
       });
   }
 
