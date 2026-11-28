@@ -436,8 +436,8 @@ script plays the monitors, the operator and the fleet manager, and checks:
 10. Old bags are deleted beyond the configured number.
 11. The fault manager is stopped: the web API answers 503 and the adapter adds
     `faultManagerTimeout` to the state. After the restart the history is back,
-    no fault is restored as active, and sequence numbers and occurrence counts
-    continue.
+    no fault is restored as active, the restart raises no fault by itself, and
+    sequence numbers and occurrence counts continue.
 12. The adapter is killed: its three faults are raised by their watchdogs, and
     clear when it is started again.
 
