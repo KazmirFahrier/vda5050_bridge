@@ -223,5 +223,9 @@ inline int run_all_tests()
 #define ASSERT_FALSE(c) MINI_GTEST_ASSERT_(!static_cast<bool>(c), "Expected false: " #c)
 #define ASSERT_EQ(a, b) MINI_GTEST_ASSERT_((a) == (b), "Expected equal: " #a " and " #b)
 #define ASSERT_NE(a, b) MINI_GTEST_ASSERT_((a) != (b), "Expected not equal: " #a " and " #b)
+#define ASSERT_LT(a, b) MINI_GTEST_ASSERT_((a) < (b), "Expected: " #a " < " #b)
+#define ASSERT_LE(a, b) MINI_GTEST_ASSERT_((a) <= (b), "Expected: " #a " <= " #b)
+#define ASSERT_GT(a, b) MINI_GTEST_ASSERT_((a) > (b), "Expected: " #a " > " #b)
+#define ASSERT_GE(a, b) MINI_GTEST_ASSERT_((a) >= (b), "Expected: " #a " >= " #b)
 
 #endif  // MINI_GTEST__GTEST_H_

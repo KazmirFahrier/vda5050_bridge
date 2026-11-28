@@ -1,0 +1,192 @@
+{
+  "mapId": "warehouse",
+  "nodes": [
+    {
+      "id": "A1",
+      "x": 0.0,
+      "y": 4.0
+    },
+    {
+      "id": "C1",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "id": "A2",
+      "x": 2.0,
+      "y": 4.0
+    },
+    {
+      "id": "C2",
+      "x": 2.0,
+      "y": 0.0
+    },
+    {
+      "id": "A3",
+      "x": 4.0,
+      "y": 4.0
+    },
+    {
+      "id": "C3",
+      "x": 4.0,
+      "y": 0.0
+    },
+    {
+      "id": "A4",
+      "x": 6.0,
+      "y": 4.0
+    },
+    {
+      "id": "C4",
+      "x": 6.0,
+      "y": 0.0
+    },
+    {
+      "id": "A5",
+      "x": 8.0,
+      "y": 4.0
+    },
+    {
+      "id": "C5",
+      "x": 8.0,
+      "y": 0.0
+    },
+    {
+      "id": "B1",
+      "x": 0.0,
+      "y": 2.0
+    },
+    {
+      "id": "P1",
+      "x": 0.0,
+      "y": -2.0,
+      "parking": true
+    },
+    {
+      "id": "B3",
+      "x": 4.0,
+      "y": 2.0
+    },
+    {
+      "id": "P3",
+      "x": 4.0,
+      "y": -2.0,
+      "parking": true
+    },
+    {
+      "id": "B5",
+      "x": 8.0,
+      "y": 2.0
+    },
+    {
+      "id": "P5",
+      "x": 8.0,
+      "y": -2.0,
+      "parking": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "A1-A2",
+      "from": "A1",
+      "to": "A2",
+      "bidirectional": true
+    },
+    {
+      "id": "C1-C2",
+      "from": "C1",
+      "to": "C2",
+      "bidirectional": true
+    },
+    {
+      "id": "A2-A3",
+      "from": "A2",
+      "to": "A3",
+      "bidirectional": true
+    },
+    {
+      "id": "C2-C3",
+      "from": "C2",
+      "to": "C3",
+      "bidirectional": true
+    },
+    {
+      "id": "A3-A4",
+      "from": "A3",
+      "to": "A4",
+      "bidirectional": true
+    },
+    {
+      "id": "C3-C4",
+      "from": "C3",
+      "to": "C4",
+      "bidirectional": true
+    },
+    {
+      "id": "A4-A5",
+      "from": "A4",
+      "to": "A5",
+      "bidirectional": true
+    },
+    {
+      "id": "C4-C5",
+      "from": "C4",
+      "to": "C5",
+      "bidirectional": true
+    },
+    {
+      "id": "A1-B1",
+      "from": "A1",
+      "to": "B1",
+      "bidirectional": true
+    },
+    {
+      "id": "B1-C1",
+      "from": "B1",
+      "to": "C1",
+      "bidirectional": true
+    },
+    {
+      "id": "C1-P1",
+      "from": "C1",
+      "to": "P1",
+      "bidirectional": true
+    },
+    {
+      "id": "A3-B3",
+      "from": "A3",
+      "to": "B3",
+      "bidirectional": true
+    },
+    {
+      "id": "B3-C3",
+      "from": "B3",
+      "to": "C3",
+      "bidirectional": true
+    },
+    {
+      "id": "C3-P3",
+      "from": "C3",
+      "to": "P3",
+      "bidirectional": true
+    },
+    {
+      "id": "A5-B5",
+      "from": "A5",
+      "to": "B5",
+      "bidirectional": true
+    },
+    {
+      "id": "B5-C5",
+      "from": "B5",
+      "to": "C5",
+      "bidirectional": true
+    },
+    {
+      "id": "C5-P5",
+      "from": "C5",
+      "to": "P5",
+      "bidirectional": true
+    }
+  ]
+}

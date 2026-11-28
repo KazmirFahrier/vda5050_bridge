@@ -416,3 +416,174 @@ wall-clock jumps (NTP).
 **Cost.** In a simulation running slower than real time, a 500 ms debounce is
 500 ms of real time, not of simulated time.
 
+
+## ADR-027: Fleet control is a library without ROS and without MQTT
+
+**Context.** The fleet manager needs MQTT to talk to vehicles and nothing
+from ROS. Its hard part is logic: who may drive where, and when.
+
+**Decision.** `fleet_core` has neither. It gets messages as text through
+`on_message()`, sends through the `MqttTransport` interface that
+`vda5050_core` already defines, and is driven by `tick(now)` with the time
+passed in. The program `fleet_manager` in `vda5050_fleet` adds the broker
+connection and a loop.
+
+**Why.** The same reasons as for `vda5050_core` (ADR-001), and one more: with
+time and transport in the caller's hands, a test can run a fleet of real
+vehicle state machines against the real fleet manager, lose and delay
+messages on purpose, and simulate ten minutes in a few milliseconds. The
+soak tests run tens of thousands of such scenarios. Through a broker and
+real clocks that would take weeks.
+
+**Cost.** One more package and an interface to keep.
+
+## ADR-028: Safety comes from claims checked at grant time, not from the plan
+
+**Context.** The planner is the largest and most intricate part of the fleet
+manager. It will have bugs.
+
+**Decision.** A move is handed to a vehicle only if what it needs conflicts
+with nothing another vehicle holds. That check is a few lines, uses no plan
+and no time, and is applied to every move whatever produced it. In addition
+every plan is checked by a separate validator before use.
+
+**Why.** Two properties with very different costs of failure should not rest
+on the same code. A planner bug now costs waiting, or a plan thrown away. It
+cannot send two vehicles into the same place.
+
+**Cost.** The plan and the claims can disagree. Then a vehicle waits although
+the plan said go. That is the intended direction of the error.
+
+## ADR-029: Resources conflict by geometry
+
+**Context.** The usual first version reserves nodes and edges by identity:
+two vehicles may not have the same node or edge.
+
+**Decision.** A table says for every pair of resources whether vehicles on
+them could touch, computed from the distance between the two shapes and the
+vehicle size.
+
+**Why.** Identity misses the cases that actually happen on a floor: the two
+directions of one aisle are two edges; an edge passes within a vehicle's
+width of a node it does not end at; two edges cross without a node. With
+the table, all of these are the same case as "same node".
+
+**Cost.** Quadratic in the number of resources, computed at start. The
+roadmap's geometry must be right: the table believes it.
+
+## ADR-030: What is granted is never taken back; three edges are granted ahead
+
+**Context.** A vehicle that is told its route one edge at a time stops at
+every node. A vehicle that is told all of it cannot be rerouted.
+
+**Decision.** Up to three edges are granted ahead and sent as the base of
+the order; a further three are shown as horizon. A grant is final. Changing
+a vehicle's mind means cancelling its order and waiting until it stands.
+Moves that only make room for others are granted one at a time.
+
+**Why.** Revoking a grant is a race against a moving vehicle: by the time the
+message arrives it may have entered the edge. "Final" removes the race. The
+price is that everything granted is closed to others, so the window is kept
+short, and shortest for moves the next plan may not want any more. That
+last rule came from a test run in which a vehicle with three granted steps
+of a detour held a corridor shut indefinitely.
+
+**Cost.** Vehicles slow down or stop when the next grant is late. Three is a
+default, not a measured optimum.
+
+## ADR-031: The planner is fast and incomplete, with a searched second stage
+
+**Context.** Finding optimal routes for several vehicles is NP-hard.
+Complete algorithms exist (conflict-based search is one) but their running
+time explodes in exactly the crowded cases where they are needed.
+
+**Decision.** First plan one vehicle after another (prioritised planning
+with safe-interval path planning), trying several orderings. If a vehicle is
+left without a route, run a conflict-based search with a fixed budget. If
+that fails too, move vehicles one step and plan again.
+
+**Why.** The fleet manager replans often and must answer in milliseconds;
+most replans are easy. The search is there for the cases an ordering cannot
+solve, of which a vehicle that must overshoot and come back is the smallest.
+The budget turns "may run for minutes" into "may not find it", and for that
+case the third stage keeps things moving.
+
+**Cost.** No optimality and no completeness. A hard case can take many small
+steps where one good plan existed. The orderings and repair rules of the
+first stage are heuristics that grew from failing cases; they are the
+least principled part of the code.
+
+## ADR-032: A vehicle out of step is stopped and started afresh
+
+**Context.** The fleet manager's picture of a vehicle can become wrong: an
+order was rejected, a drive failed, the vehicle restarted, a task was
+cancelled. One could try to repair the order in place for each case.
+
+**Decision.** One procedure for all of them. Send `cancelOrder`, wait until
+the vehicle reports that it stands with nothing to do, find out where it is,
+and start a new order from there. A vehicle standing on an edge keeps the
+edge and both its ends and is sent to the end. An order that was still on
+its way when the decision fell is first seen through to the vehicle and
+cancelled then.
+
+**Why.** Many causes, one path, and that path is tested heavily. During the
+procedure the vehicle keeps everything it was granted, so the claims rule
+covers it wherever it comes to rest.
+
+**Cost.** A stop that a cleverer update could sometimes avoid.
+
+## ADR-033: After a waiting time the fleet works without a vehicle it cannot place
+
+**Context.** A vehicle is known to be online, but not where it is: its state
+message was lost, or it is not localised. It could be on anybody's route.
+
+**Decision.** While such a vehicle exists, nothing is granted to anybody, and
+the vehicle is asked for its state. After ten seconds (`discovery_grace`) the
+fleet carries on without it and reports `vehicle_unlocated`.
+
+**Why.** Holding the whole fleet for ever because one vehicle does not report
+is not acceptable in operation; never waiting would send vehicles past one
+that is about to say where it is. A lost first message is resolved within a
+second by the request.
+
+**Cost.** After the waiting time a vehicle that is physically on the roadmap
+but unknown to the fleet manager is not protected by it. This is the
+largest hole in the design and is stated as a limit.
+
+## ADR-034: The fleet is tested against the real vehicle side, with monitors and seeded faults
+
+**Context.** The properties that matter (never too close, never stuck) are
+about many vehicles over time. Example-based tests only cover the cases
+somebody thought of.
+
+**Decision.** A test harness runs the fleet manager and one real
+`vda5050_core::Session` per vehicle over a message bus that delays, reorders
+across topics and loses messages. Three monitors that share no code with the
+fleet manager check distance, claims and presence after every step. Soak
+tests generate scenarios from a seed, with and without injected faults; a
+failing seed reproduces exactly.
+
+**Why.** Every serious defect of the fleet manager was found this way, none
+by a hand-written example. The monitors define the properties once, instead
+of each test asserting its own idea of them.
+
+**Cost.** The vehicle side is this project's own; both sides could share a
+misreading of the standard. The simulated vehicle is a point: nothing about
+real motion is tested.
+
+## ADR-035: The command interface is text in, text out, inside the library
+
+**Context.** Something must submit tasks: a warehouse system, an operator, a
+script. Over what?
+
+**Decision.** `fleet_core/api.hpp` offers three functions: carry out a JSON
+command and return a JSON response, encode the status, encode an event. The
+program publishes and subscribes them on MQTT topics next to the VDA 5050
+ones.
+
+**Why.** MQTT is already there, so no second server and no second port. And
+the interface can be tested without any transport, including every
+malformed command.
+
+**Cost.** MQTT has no request and response; the client matches by
+`requestId`. Access control is left to the broker.

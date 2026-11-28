@@ -62,6 +62,7 @@ if(BUILD_TESTING)
   set(TEST_SOURCES
     test/test_json.cpp
     test/test_codec.cpp
+    test/test_codec_master.cpp
     test/test_header.cpp
     test/test_order_validator.cpp
     test/test_order_manager.cpp

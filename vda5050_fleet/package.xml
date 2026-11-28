@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>vda5050_fleet</name>
+  <version>0.1.0</version>
+  <description>
+    The fleet manager as a program: fleet_core behind an MQTT connection, and a simulated
+    VDA 5050 vehicle for trying it out without robots.
+  </description>
+  <maintainer email="maintainer@example.com">vda5050_bridge maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>pkg-config</buildtool_depend>
+
+  <depend>fleet_core</depend>
+  <depend>vda5050_core</depend>
+  <!-- libmosquitto-dev has no rosdep key; install it with apt (see the README). -->
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_cmake_cpplint</test_depend>
+  <test_depend>ament_cmake_uncrustify</test_depend>
+  <test_depend>ament_cmake_xmllint</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_flake8</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
