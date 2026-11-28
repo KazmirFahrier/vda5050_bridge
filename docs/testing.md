@@ -197,7 +197,26 @@ Four deliberate bugs were injected into the code one at a time; each was caught:
 | Navigation failure does not halt | `NavigationFailureRaisesFatalErrorAndHaltsUntilCancelled` failed |
 | JSON nesting limit removed | Test binary crashed (stack overflow), i.e. the run failed |
 
-This is a spot check, not systematic mutation testing.
+The same was done for the fault management code, with eleven bugs:
+
+| Injected bug | Result |
+|---|---|
+| Gateway: acknowledge no longer checks the access token | `test_token_protects_acknowledge_but_not_reading` failed |
+| Gateway: replayed events are sent a second time | `test_stream_replays_missed_events` failed |
+| Gateway: no size limit on a POST body | `test_oversized_post_body_is_refused` failed |
+| Gateway: a client that does not read is never dropped | `test_slow_reader_is_dropped_not_buffered_forever` failed |
+| History file is never rotated | `RotatesWhenTheFileGrowsPastItsLimit` failed |
+| Rotated history file is not read back | `RotatesWhenTheFileGrowsPastItsLimit` failed |
+| `stopPause` releases a vehicle that is held by a fault | `HoldAndMasterPauseAreIndependent` failed |
+| A held vehicle starts its next leg | `HeldVehicleDoesNotStartTheNextLeg` and `HoldBeforeAnOrderDelaysItsStart` failed |
+| Releasing the hold does not continue the order | The same two tests failed |
+| External errors are not put into the state | `ExternalErrorsAreReportedAlongsideOrderErrors` failed |
+| Adapter never holds the vehicle (in CI, on a separate branch) | The fault system test failed at "vehicle is held: paused, not driving" |
+
+The last one matters because the fault system test passed on its first CI
+run. A test that has never failed proves little, so it was made to fail once.
+
+These are spot checks, not systematic mutation testing.
 
 AddressSanitizer also found one real defect during development, in a test
 rather than in the library: a reference was kept into a temporary JSON document
@@ -214,8 +233,11 @@ twelve scenarios, among them a critical fault that pauses an order until an
 operator acknowledges it over HTTP, the bag written by the flight recorder,
 a restart of the fault manager, and a killed adapter detected by watchdogs.
 
-What these runs found is listed in the table under
-[What these runs found](#what-these-runs-found).
+What the work on these tests found: no defect in the fault management code
+itself. Two defects were in tests (a watchdog in the shared test catalogue
+fired during an unrelated flicker test; an HTTP test closed a connection but
+not its response, so the socket stayed open). The first CI build found one
+deprecated rosbag2 call and one line over the length limit.
 
 ## The adapter integration test
 
