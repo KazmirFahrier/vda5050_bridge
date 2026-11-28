@@ -307,3 +307,35 @@ shall be sent retained, so a master that connects later still receives it. An
 earlier version of this code published it non-retained, on an assumption; it
 was corrected when the claim was checked against the specification text.
 
+## ADR-021: Faults from outside the order logic enter through one setter
+
+**Context.** `state.errors` so far held only errors the order manager itself
+produced (a rejected order, a failed navigation). Hardware and software faults
+must appear there too.
+
+**Decision.** `OrderManager::set_external_errors()` replaces a separate list
+that `snapshot()` appends to its own errors. The caller passes the complete
+current set each time.
+
+**Why.** Passing the whole set makes the call idempotent: a lost or repeated
+call cannot leave a stale error behind, which add/remove calls could. The two
+lists have different lifetimes (order errors are cleared by the next order; a
+broken lidar is not), so they are stored separately. The order manager stays
+unaware of what a fault manager is.
+
+**Cost.** The caller must compute the full set on every change. A state
+message is requested only when the set differs from the previous one.
+
+## ADR-022: `fault_core` depends on `vda5050_core`
+
+**Context.** The fault library needs JSON reading and writing, and a function
+that maps faults to VDA 5050 errors.
+
+**Decision.** `fault_core` links `vda5050_core` and uses its `Json` class.
+
+**Why.** A second JSON implementation, or an external one, would add code or
+a dependency for no gain. The dependency points one way: the bridge core knows
+nothing about faults.
+
+**Cost.** `fault_core` cannot be used without `vda5050_core`. If it is ever
+needed alone, the JSON module should move to a small package of its own.

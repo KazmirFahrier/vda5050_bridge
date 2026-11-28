@@ -570,6 +570,35 @@ void OrderManager::set_safety_state(const SafetyState & safety)
   }
 }
 
+namespace
+{
+
+bool same_errors(const std::vector<Error> & a, const std::vector<Error> & b)
+{
+  return std::equal(
+    a.begin(), a.end(), b.begin(), b.end(), [](const Error & x, const Error & y) {
+      return x.error_type == y.error_type && x.error_level == y.error_level &&
+             x.error_description == y.error_description &&
+             std::equal(
+        x.error_references.begin(), x.error_references.end(),
+        y.error_references.begin(), y.error_references.end(),
+        [](const ErrorReference & r, const ErrorReference & q) {
+          return r.reference_key == q.reference_key && r.reference_value == q.reference_value;
+        });
+    });
+}
+
+}  // namespace
+
+void OrderManager::set_external_errors(std::vector<Error> errors)
+{
+  if (same_errors(errors, external_errors_)) {
+    return;
+  }
+  external_errors_ = std::move(errors);
+  state_changed_ = true;
+}
+
 State OrderManager::snapshot() const
 {
   State state;
@@ -602,6 +631,7 @@ State OrderManager::snapshot() const
   state.battery_state = battery_;
   state.operating_mode = operating_mode_;
   state.errors = errors_;
+  state.errors.insert(state.errors.end(), external_errors_.begin(), external_errors_.end());
   state.safety_state = safety_;
   return state;
 }

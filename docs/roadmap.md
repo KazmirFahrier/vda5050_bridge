@@ -4,11 +4,25 @@
 
 | Area | State |
 |---|---|
-| `vda5050_core` | Implemented; 109 unit tests, 98.8 % line coverage, schema-conformant |
+| `vda5050_core` | Implemented; 110 unit tests, 98.8 % line coverage, schema-conformant |
+| `fault_core` | Library implemented; 52 unit tests. Not yet used by any ROS node |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
 | CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
 
-## Next steps, in order
+## Fault management: milestones
+
+`fault_core` is the first of several steps. See
+[fault_management.md](fault_management.md) for what exists.
+
+| Step | Content | State |
+|---|---|---|
+| 1 | `fault_core` library; `OrderManager::set_external_errors()`; mapping to VDA 5050 errors | Done |
+| 2 | `fault_msgs` and a `fault_manager` ROS 2 node: report topic, `/diagnostics` input, services to list, query and acknowledge, history file | Not started |
+| 3 | The adapter subscribes to raised faults and puts them in `state.errors` | Not started |
+| 4 | Automatic data capture on a fault (rosbag2 snapshot of the last seconds) | Not started |
+| 5 | Web API (REST and server-sent events) for operators | Not started |
+
+## Next steps for the bridge, in order
 
 ### 1. Nav2 parameters for deployment
 - Ship a recommended Nav2 parameter file, with a goal tolerance tighter than
@@ -41,7 +55,6 @@
 ### Later
 - VDA 5050 v3.0 codec alongside v2 (the state machine is wire-format neutral)
 - TLS and certificate authentication for MQTT
-- `diagnostic_msgs` output and a fault-history service
 - `NavigateThroughPoses` across several released nodes for smoother motion
 
 ## Known limitations

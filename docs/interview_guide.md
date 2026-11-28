@@ -15,7 +15,7 @@ as the rest; interviewers probe exactly there.
 > no ROS dependency: it decodes orders, validates them, runs a state machine
 > that walks the route node by node, schedules actions by their blocking type,
 > handles cancel and pause, and decides what goes out over MQTT and when. It has
-> 109 unit tests that run in milliseconds, with 98.8 % line coverage, and its
+> 110 unit tests that run in milliseconds, with 98.8 % line coverage, and its
 > messages validate against the official VDA 5050 JSON schemas. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
@@ -216,13 +216,59 @@ periodic rule testable with a fake clock (ADR-014).
 - **tf2**: `map -> odom -> base_link`, and where `agvPosition` comes from.
 - **colcon / ament**: `package.xml` dependency types, `ament_export_targets`.
 
+## Questions about fault management
+
+The repository has a second library, `fault_core`. Full text:
+[fault_management.md](fault_management.md). Short answers:
+
+**What does it do?**
+Monitors report "failing" or "healthy" for a fault code. The library decides
+when that is a real fault, keeps it visible as long as needed, and records
+every change with a sequence number.
+
+**What is debouncing and why both directions?**
+A fault becomes active only after failing for a set time, and clears only
+after being healthy for a set time. The first filters glitches. The second
+joins a flickering condition into one occurrence, so a loose connector gives
+one event and not thousands (an alarm storm).
+
+**What is a latched fault?**
+One that stays visible after its cause has gone, until a person acknowledges
+it. Example: a bumper contact that lasted half a second. Acknowledging is
+refused while the cause is present.
+
+**How do you notice a dead monitor?**
+A watchdog per fault: no report for longer than the timeout counts as
+failing. Otherwise a crashed monitor looks the same as a healthy system.
+
+**Why is the active state not restored after a restart?**
+The cause may be gone, and nothing would then clear the restored fault. Real
+faults are reported again by their monitors within one period. History and
+occurrence counters are restored.
+
+**Why a JSON Lines file and not a database?**
+Appending a line is cheap and a power cut can damage at most the last line,
+which the loader skips and counts. No dependency. The cost: no rotation yet,
+and filtering happens in memory.
+
+**How do faults reach the fleet manager?**
+Raised faults are converted to VDA 5050 errors and given to the order
+manager, which lists them in `state.errors`. `CRITICAL` maps to `FATAL`,
+`ERROR` and `WARNING` to `WARNING`.
+
+**What is the state of it?**
+A tested library. No ROS node uses it yet; that is the next milestone. Say
+this plainly.
+
 ## Be honest about
 
 State these before you are asked.
 
 - It has never run on a physical robot or against a real fleet manager. A
   script plays master control.
-- Coverage is measured for the core only; the adapter has end-to-end tests but
+- `fault_core` is a library with unit tests. Nothing on a running robot uses
+  it yet: no node, no monitors, no web interface.
+- Coverage is measured for the two libraries only; the adapter has end-to-end tests but
   no unit tests.
 - With default Nav2 parameters the robot stops up to 0.24 m from a node and
   Nav2 can give up in a narrow passage. I report that correctly; I have not

@@ -14,10 +14,11 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 
 | Package | What it is | Verification |
 |---|---|---|
-| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 109 unit tests and one end-to-end example, 98.8 % line coverage. Runs in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon on ROS 2 Jazzy. Its messages are validated against the official VDA 5050 JSON schemas, versions 2.0.0 and 2.1.0, and its parsers are fuzzed for 60 s per build |
+| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 110 unit tests and one end-to-end example, 98.8 % line coverage. Runs in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon on ROS 2 Jazzy. Its messages are validated against the official VDA 5050 JSON schemas, versions 2.0.0 and 2.1.0, and its parsers are fuzzed for 60 s per build |
+| `fault_core` | ROS-independent C++17 library for fault management: fault catalogue, debounce / latch / watchdog state machine, event history with persistence, mapping of faults to VDA 5050 errors. **A library only so far: no ROS node uses it yet** | 52 unit tests, run in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon. See [docs/fault_management.md](docs/fault_management.md) |
 | `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Tested in CI against a real Mosquitto broker (including a broker outage, a crash, and lifecycle transitions driven from outside) and against the **real Nav2 stack**, both with Nav2's loopback simulator and in **Gazebo** with a simulated lidar and AMCL |
 
-Both packages pass the ROS 2 linters (cpplint, uncrustify, xmllint, lint_cmake,
+All packages pass the ROS 2 linters (cpplint, uncrustify, xmllint, lint_cmake,
 flake8, pep257) as part of `colcon test`.
 
 What has **not** been done, and cannot be from a CI machine:
@@ -28,7 +29,7 @@ What has **not** been done, and cannot be from a CI machine:
 
 Known gaps and deviations:
 
-- Line coverage is measured for the core only. The adapter is exercised by
+- Line coverage is measured for the two libraries only. The adapter is exercised by
   three end-to-end tests but has no unit tests and no coverage figure.
 - Action status `PAUSED` is in the specification text but not in the official
   schemas' enum. The library follows the text; a master that validates strictly
@@ -53,6 +54,7 @@ vda5050_bridge/
 │   ├── architecture.md             How the code is structured and why
 │   ├── design_decisions.md         Decision records with trade-offs
 │   ├── testing.md                  What is tested, how, and what is not
+│   ├── fault_management.md         The fault-management library: concepts and design
 │   ├── interview_guide.md          How to present and defend this project
 │   └── roadmap.md                  Next steps and known limitations
 ├── vda5050_core/                   ament_cmake package, no ROS dependencies
@@ -146,6 +148,8 @@ without a display, `xvfb`.
    written as a short scenario.
 4. `vda5050_core/src/order_manager.cpp`, then `session.cpp`.
 5. `vda5050_nav2_adapter/src/adapter_node.cpp` for how ROS 2 is attached.
+6. [docs/fault_management.md](docs/fault_management.md), then
+   `fault_core/test/test_fault_manager.cpp`, for the fault-management library.
 
 ## License
 

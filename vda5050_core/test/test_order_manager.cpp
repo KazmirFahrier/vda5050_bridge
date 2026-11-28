@@ -842,3 +842,41 @@ TEST_F(OrderManagerTest, TelemetryIsMirroredIntoState)
   EXPECT_TRUE(state.operating_mode == OperatingMode::Manual);
   EXPECT_TRUE(state.safety_state.e_stop == EStop::Manual);
 }
+
+TEST_F(OrderManagerTest, ExternalErrorsAreReportedAlongsideOrderErrors)
+{
+  manager.consume_state_changed();
+  Error fault{"LIDAR-001", {{"source", "lidar_driver"}}, "no scans", ErrorLevel::Fatal};
+
+  manager.set_external_errors({fault});
+  EXPECT_TRUE(manager.consume_state_changed());  // master control hears of it at once
+  manager.set_external_errors({fault});
+  EXPECT_FALSE(manager.consume_state_changed());  // the same set again is not news
+
+  manager.report_malformed_message("order", "bad");
+  State state = manager.snapshot();
+  ASSERT_EQ(state.errors.size(), 2u);
+  EXPECT_EQ(state.errors[0].error_type, error_type::kValidation);  // own errors first
+  EXPECT_EQ(state.errors[1].error_type, "LIDAR-001");
+  EXPECT_TRUE(state.errors[1].error_level == ErrorLevel::Fatal);
+  EXPECT_EQ(state.errors[1].error_references[0].reference_value, "lidar_driver");
+
+  // A new order clears the order manager's own errors, but a hardware fault
+  // does not go away because master control sent something new.
+  manager.handle_order(make_order("o1", 0, 1, 1));
+  state = manager.snapshot();
+  ASSERT_EQ(state.errors.size(), 1u);
+  EXPECT_EQ(state.errors[0].error_type, "LIDAR-001");
+
+  manager.consume_state_changed();
+  fault.error_description = "scan rate 2 Hz";
+  manager.set_external_errors({fault});
+  EXPECT_TRUE(manager.consume_state_changed());  // any difference counts as a change
+  fault.error_references[0].reference_value = "watchdog";
+  manager.set_external_errors({fault});
+  EXPECT_TRUE(manager.consume_state_changed());
+
+  manager.set_external_errors({});
+  EXPECT_TRUE(manager.consume_state_changed());
+  EXPECT_TRUE(manager.snapshot().errors.empty());
+}
