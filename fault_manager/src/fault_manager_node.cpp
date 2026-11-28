@@ -48,6 +48,10 @@ FaultManagerNode::FaultManagerNode(const rclcpp::NodeOptions & options)
   declare_parameter("accept_unknown_codes", true);
   declare_parameter("tick_rate_hz", 10.0);
   declare_parameter("publish_interval_s", 5.0);
+  // After start-up, monitors need a moment to be discovered and to send their
+  // first report. Watchdogs and debounce timers start only after this time, so
+  // that a restart of this node does not raise a burst of false faults.
+  declare_parameter("startup_grace_s", 5.0);
 
   declare_parameter("diagnostics.enabled", true);
   declare_parameter("diagnostics.topic", "/diagnostics");
@@ -194,6 +198,9 @@ FaultManagerNode::FaultManagerNode(const rclcpp::NodeOptions & options)
       }
     });
 
+  start_time_ = std::chrono::steady_clock::now();
+  startup_grace_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+    std::chrono::duration<double>(std::max(0.0, get_parameter("startup_grace_s").as_double())));
   publish_interval_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
     std::chrono::duration<double>(std::max(0.1, get_parameter("publish_interval_s").as_double())));
   const double rate = get_parameter("tick_rate_hz").as_double();
@@ -228,7 +235,10 @@ void FaultManagerNode::on_diagnostics(const diagnostic_msgs::msg::DiagnosticArra
 
 void FaultManagerNode::on_timer()
 {
-  manager_->tick(std::chrono::steady_clock::now());
+  const auto now = std::chrono::steady_clock::now();
+  if (now - start_time_ >= startup_grace_) {
+    manager_->tick(now);
+  }
   process_changes();
   if (recorder_) {
     recorder_->spin_once();

@@ -270,6 +270,11 @@ report to the JSON text that would be published.
 | Service | `faults/acknowledge` | `fault_msgs/AcknowledgeFault` | Acknowledge a latched fault |
 | Service | `faults/get_history` | `fault_msgs/GetFaultHistory` | Query recorded events |
 
+Watchdogs and debounce timers start a few seconds after the node does
+(`startup_grace_s`). Monitors need that time to be discovered and to send a
+first report; without it, restarting the fault manager raised a false watchdog
+fault in the system test.
+
 Parameters are listed with comments in `fault_manager/config/fault_manager.yaml`.
 The node refuses to start if the catalogue cannot be read; the error names the
 entry at fault.

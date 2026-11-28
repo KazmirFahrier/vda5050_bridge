@@ -145,6 +145,14 @@ void SnapshotRecorder::prune(SteadyTime now)
 
 void SnapshotRecorder::write(const Pending & pending)
 {
+  if (buffer_.empty()) {
+    // Typically right after start-up, before the topics were found. An empty
+    // bag would only take the place of a useful one.
+    RCLCPP_WARN(
+      node_.get_logger(), "capture: nothing buffered for fault %s; no bag written",
+      pending.event.code.c_str());
+    return;
+  }
   char sequence[32];
   std::snprintf(
     sequence, sizeof(sequence), "%06llu",

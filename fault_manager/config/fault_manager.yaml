@@ -17,6 +17,9 @@ fault_manager:
 
     tick_rate_hz: 10.0             # resolution of debounce times and watchdogs
     publish_interval_s: 5.0        # faults/active is repeated at least this often
+    # Watchdogs and debounce timers start this long after start-up, so that
+    # monitors have time to be discovered and send their first report.
+    startup_grace_s: 5.0
 
     diagnostics:
       enabled: true

@@ -74,6 +74,11 @@ private:
   std::string last_published_;  ///< Encoded form of the last faults/active message.
   std::chrono::steady_clock::time_point last_publish_time_{};
   std::chrono::steady_clock::duration publish_interval_{std::chrono::seconds(5)};
+
+  /// Watchdogs start counting only this long after start-up; see the
+  /// parameter 'startup_grace_s'.
+  std::chrono::steady_clock::time_point start_time_{};
+  std::chrono::steady_clock::duration startup_grace_{std::chrono::seconds(5)};
 };
 
 }  // namespace fault_manager

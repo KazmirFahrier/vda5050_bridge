@@ -594,7 +594,8 @@ def main():
 
     start_fault_manager()
     wait_until('history is back after the restart',
-               lambda: [event['sequence'] for event in api_history()] == sequences, 20)
+               lambda: [event['sequence'] for event in api_history()][:len(sequences)]
+               == sequences, 20)
     wait_until('adapter withdraws the warning',
                lambda: 'faultManagerTimeout' not in mqtt.state_errors(), 15)
     wait_until('monitors are connected again',
@@ -602,6 +603,10 @@ def main():
     if 'TEST-INSTANT' in api_faults():
         fail('a fault was restored as active from the history file')
     time.sleep(1.0)
+    if [event['sequence'] for event in api_history()] != sequences:
+        fail('restarting the fault manager produced events by itself: '
+             f'{api_history()[len(sequences):]}')
+    ok('the restart itself raised no fault (start-up grace period)')
     monitors.report('TEST-INSTANT', True, 'again')
     fault = wait_until('a new occurrence after the restart',
                        lambda: api_faults().get('TEST-INSTANT'))

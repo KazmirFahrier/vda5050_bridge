@@ -233,8 +233,18 @@ twelve scenarios, among them a critical fault that pauses an order until an
 operator acknowledges it over HTTP, the bag written by the flight recorder,
 a restart of the fault manager, and a killed adapter detected by watchdogs.
 
-What the work on these tests found: no defect in the fault management code
-itself. Two defects were in tests (a watchdog in the shared test catalogue
+What the work on these tests found:
+
+- **False watchdog fault after a restart** (fixed). In one CI run the
+  restarted fault manager needed almost three seconds to be discovered by a
+  monitor that was reporting all along. A fault with a 2 s watchdog was raised
+  and cleared again. Watchdogs now start only after a start-up grace period,
+  and the system test fails if a restart produces an event by itself.
+- **An empty bag** (fixed). That same false fault triggered a capture before
+  the recorder had found its topics, and a bag with no messages was written.
+  The recorder now writes nothing when its buffer is empty.
+
+No other defect was found in the fault management code. Two defects were in tests (a watchdog in the shared test catalogue
 fired during an unrelated flicker test; an HTTP test closed a connection but
 not its response, so the socket stayed open). The first CI build found one
 deprecated rosbag2 call and one line over the length limit.
