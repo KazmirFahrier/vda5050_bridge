@@ -74,6 +74,7 @@ public:
   // NavigationPort
   void navigate_to(const vda5050_core::Node & target, const vda5050_core::Edge &) override
   {
+    paused_ = false;  // a pause belongs to the goal it was given for
     if (fail_next_navigation_) {
       fail_next_navigation_ = false;
       failing_ = true;  // reported on the next step, as a real stack would
@@ -90,6 +91,7 @@ public:
   void cancel() override
   {
     moving_ = false;
+    paused_ = false;    // a cancelled goal is gone; there is nothing left to resume
     cancelled_ = true;  // stops where it is, like a cancelled Nav2 goal
   }
   void pause() override {paused_ = true;}
@@ -103,6 +105,7 @@ public:
   {
     running_actions_[action.action_id] = {action.action_type, action_seconds_};
     started_.push_back(action.action_id);
+    ++actions_started_;
   }
   void cancel(const std::string & action_id) override {running_actions_.erase(action_id);}
 
@@ -133,6 +136,7 @@ public:
   /// Actions the vehicle has executed, in order (ids as sent by the fleet manager).
   const std::vector<std::string> & finished_actions() const {return finished_;}
   double distance_driven() const {return driven_;}
+  std::size_t actions_started() const {return actions_started_;}
 
 private:
   World & world_;
@@ -153,6 +157,7 @@ private:
   bool connected_{false};
   std::map<std::string, std::pair<std::string, double>> running_actions_;
   std::vector<std::string> started_;
+  std::size_t actions_started_{0};
   std::vector<std::string> finished_;
 };
 
@@ -160,7 +165,8 @@ class World : public vda5050_core::MqttTransport
 {
 public:
   World(fleet_core::Roadmap roadmap, fleet_core::FleetConfig config, WorldOptions options = {})
-  : options_(options), random_(options.seed), radius_(config.vehicle_radius),
+  : presence_tolerance_(config.attach_tolerance + 1e-6), options_(options),
+    random_(options.seed), radius_(config.vehicle_radius),
     fleet_(std::move(roadmap), std::move(config), *this, [this] {return wall_clock();}) {}
 
   fleet_core::FleetManager & fleet() {return fleet_;}
@@ -178,15 +184,24 @@ public:
       std::chrono::duration<double>(1795824000.0 + time_));
   }
 
-  /// Put a vehicle on a node and connect it.
-  SimVehicle & add_vehicle(const std::string & serial, const std::string & node_id)
+  /// Put a vehicle on a node and (unless told otherwise) connect it.
+  SimVehicle & add_vehicle(
+    const std::string & serial, const std::string & node_id, bool connect = true)
   {
     const fleet_core::MapNode & node =
       fleet_.roadmap().node(*fleet_.roadmap().find_node(node_id));
     vehicles_.push_back(std::make_unique<SimVehicle>(*this, serial, node.x, node.y));
-    vehicles_.back()->connect(now());
+    if (connect) {
+      vehicles_.back()->connect(now());
+    }
     return *vehicles_.back();
   }
+  /// Lose the next message to the fleet manager whose topic contains `part`.
+  void lose_next_to_fleet(const std::string & part) {lose_next_.push_back(part);}
+  /// Lose the next message to a vehicle whose topic contains `part`.
+  void lose_next_to_vehicles(const std::string & part) {lose_next_out_.push_back(part);}
+  /// Every order the fleet manager has sent, decoded, in order.
+  const std::vector<vda5050_core::Order> & orders() const {return orders_;}
   SimVehicle & vehicle(const std::string & serial)
   {
     for (const auto & item : vehicles_) {
@@ -201,11 +216,28 @@ public:
   // MqttTransport of the fleet manager: towards the vehicles.
   void publish(const vda5050_core::MqttMessage & message) override
   {
+    if (message.topic.size() > 6 &&
+      message.topic.compare(message.topic.size() - 6, 6, "/order") == 0)
+    {
+      orders_.push_back(vda5050_core::decode_order(message.payload));
+    }
+    for (auto it = lose_next_out_.begin(); it != lose_next_out_.end(); ++it) {
+      if (message.topic.find(*it) != std::string::npos) {
+        lose_next_out_.erase(it);
+        return;
+      }
+    }
     post(to_vehicles_, message.topic, message.payload, message.qos == 0);
     ++messages_to_vehicles_;
   }
   void post_to_fleet(const std::string & topic, const std::string & payload, bool lossy)
   {
+    for (auto it = lose_next_.begin(); it != lose_next_.end(); ++it) {
+      if (topic.find(*it) != std::string::npos) {
+        lose_next_.erase(it);
+        return;
+      }
+    }
     post(to_fleet_, topic, payload, lossy);
   }
 
@@ -351,12 +383,9 @@ private:
     }
   }
 
-public:
-  /// How far a vehicle may be from what it holds (it moves exactly on the
-  /// lines, so this only has to cover a vehicle placed by hand).
-  double presence_tolerance_{1e-6};
-
-private:
+  /// How far a vehicle may be from what it holds: as far as the fleet manager
+  /// accepts a vehicle as being "at" a node.
+  double presence_tolerance_;
   WorldOptions options_;
   std::mt19937 random_;
   double radius_;
@@ -367,6 +396,9 @@ private:
   std::deque<Envelope> to_fleet_;
   std::vector<std::unique_ptr<SimVehicle>> vehicles_;
   std::vector<std::string> violations_;
+  std::vector<std::string> lose_next_;
+  std::vector<std::string> lose_next_out_;
+  std::vector<vda5050_core::Order> orders_;
   fleet_core::FleetManager fleet_;
 };
 

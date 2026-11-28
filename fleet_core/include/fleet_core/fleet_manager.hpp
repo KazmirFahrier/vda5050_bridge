@@ -57,14 +57,18 @@ struct FleetConfig
 
   /// Vehicles are treated as discs of this radius (metres), fleet-wide.
   double vehicle_radius{0.4};
-  /// Extra distance kept between two vehicles; must cover how far a vehicle
-  /// may be from the line it is supposed to drive on.
+  /// Extra distance kept between two vehicles, on top of two radii. It has to
+  /// cover how far a vehicle may be from where the books say it is, so the
+  /// distance actually kept is 2 * radius + max(safety_margin,
+  /// 2 * attach_tolerance): each of two vehicles may be off by the tolerance.
   double safety_margin{0.2};
 
   PlannerConfig planner;
 
-  /// A vehicle is placed on the roadmap if it is within this distance of a node.
-  double attach_tolerance{0.3};
+  /// A vehicle counts as being at a node if it is within this distance of it.
+  /// Keep it as small as the vehicles' stopping accuracy allows: it widens
+  /// the distance kept between vehicles (see safety_margin).
+  double attach_tolerance{0.25};
   /// How many edges ahead a vehicle is given at most (the length of its base).
   std::size_t release_ahead{3};
   /// How many further planned edges are shown to the vehicle as horizon.

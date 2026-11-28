@@ -17,6 +17,9 @@ namespace
 {
 
 constexpr double kEpsilon = 1e-9;
+/// How often an order that is no longer wanted is sent again before the
+/// fleet manager concludes that the vehicle will never take it.
+constexpr int kStopAttempts = 5;
 
 using vda5050_core::ActionStatus;
 using vda5050_core::ErrorLevel;
@@ -81,6 +84,7 @@ struct GrantedMove
   std::uint32_t sequence_to{0};  ///< sequenceId of the node `to` in the order.
   bool sent{false};              ///< Part of an order the vehicle has confirmed.
   std::size_t stops{0};          ///< Task stops reached when this move is done.
+  TaskId task{0};                ///< The task those stops belong to.
 };
 
 struct PendingOrder
@@ -89,6 +93,8 @@ struct PendingOrder
   std::uint32_t update_id{0};
   TimePoint sent_at{};
   std::size_t start_stops{0};    ///< Task stops at the first node of a new order.
+  TaskId task{0};                ///< The task those stops belong to.
+  int resent{0};                 ///< How often it has been sent again.
   std::vector<int> horizon;
 };
 
@@ -147,6 +153,9 @@ struct FleetManager::Vehicle
   std::uint32_t stitch_sequence{0};
   std::optional<PendingOrder> pending;
   std::vector<int> sent_horizon;
+  /// The present order must end before the vehicle can be given more: no
+  /// horizon is shown, so that the vehicle comes to rest.
+  bool closing{false};
 
   bool available{false};
   std::string unavailable_reason{"no state received yet"};
@@ -158,6 +167,9 @@ struct FleetManager::Vehicle
   /// Set while a vehicle that stopped on an edge is being sent on: how far
   /// from the first node of its next order it may be.
   double recovery_deviation{0.0};
+  /// What it holds overlaps with what another vehicle holds: the books do
+  /// not match the floor. Neither of the two is moved until that is over.
+  bool in_conflict{false};
   int navigation_failures{0};
   std::string handled_failure;         ///< orderId whose navigation failure was counted.
 };
@@ -168,7 +180,10 @@ FleetManager::FleetManager(
   Roadmap roadmap, FleetConfig config, vda5050_core::MqttTransport & transport,
   vda5050_core::HeaderFactory::Clock clock)
 : roadmap_(std::move(roadmap)), config_(std::move(config)),
-  conflicts_(roadmap_, 2.0 * config_.vehicle_radius + config_.safety_margin),
+  conflicts_(
+    roadmap_,
+    2.0 * config_.vehicle_radius +
+    std::max(config_.safety_margin, 2.0 * config_.attach_tolerance)),
   transport_(transport), clock_(std::move(clock)) {}
 
 FleetManager::~FleetManager() = default;
@@ -313,7 +328,6 @@ void FleetManager::on_connection(
 
 void FleetManager::on_state(Vehicle & vehicle, const State & state, TimePoint now)
 {
-  const bool first = !vehicle.has_state;
   vehicle.state = state;
   vehicle.has_state = true;
   vehicle.last_state_time = now;
@@ -324,17 +338,18 @@ void FleetManager::on_state(Vehicle & vehicle, const State & state, TimePoint no
     vehicle.online_since = now;
     event(now, "vehicle_online", vehicle.identity.serial_number, "state received");
   }
-  if (first && !clean_idle(state)) {
-    // It is in the middle of something this fleet manager did not send.
-    resynchronize(vehicle, "vehicle is busy with an order from before", now);
-  }
 
   check_order_feedback(vehicle, now);
   track_progress(vehicle, now);
   track_task(vehicle, now);
   locate(vehicle, now);
 
-  if (vehicle.needs_resync && clean_idle(state)) {
+  if (!vehicle.needs_resync && !vehicle.journey_open && !vehicle.pending && !clean_idle(state)) {
+    // Busy with something it was not given, as far as the books say: an
+    // order from before, or one that was believed lost and arrived late.
+    resynchronize(vehicle, "vehicle is busy without an order from here", now);
+  }
+  if (vehicle.needs_resync && !vehicle.pending && clean_idle(state)) {
     finish_resynchronization(vehicle, now);
   }
   update_availability(vehicle, now);
@@ -464,6 +479,8 @@ void FleetManager::place(Vehicle & vehicle, int node, TimePoint now)
         now, "claim_conflict", other.identity.serial_number,
         vehicle.identity.serial_number + " appeared at " + roadmap_.node(node).id +
         ", which is on its route");
+      other.in_conflict = true;
+      vehicle.in_conflict = true;
       resynchronize(other, "another vehicle appeared on its route", now);
       update_availability(other, now);
     }
@@ -482,7 +499,8 @@ void FleetManager::check_order_feedback(Vehicle & vehicle, TimePoint now)
         move.sent = true;
       }
       vehicle.sent_horizon = vehicle.pending->horizon;
-      if (Task * task = find_task(vehicle.task)) {
+      Task * task = find_task(vehicle.task);
+      if (task != nullptr && task->id == vehicle.pending->task) {
         task->reached += vehicle.pending->start_stops;
       }
       vehicle.pending.reset();
@@ -499,6 +517,7 @@ void FleetManager::check_order_feedback(Vehicle & vehicle, TimePoint now)
         }
         if (same_order && same_update) {
           event(now, "order_rejected", serial, error.error_type + ": " + error.error_description);
+          vehicle.pending.reset();  // refused: it will not be carried out
           resynchronize(vehicle, "order rejected", now);
           return;
         }
@@ -560,7 +579,10 @@ void FleetManager::track_progress(Vehicle & vehicle, TimePoint now)
     vehicle.committed.pop_front();
     vehicle.node = done.to;
     vehicle.navigation_failures = 0;
-    if (task != nullptr) {
+    if (vehicle.plan_blocked && vehicle.committed.empty()) {
+      plan_dirty_ = true;  // it was only given a step; see what is possible now
+    }
+    if (task != nullptr && done.task == task->id) {
       task->reached += done.stops;
     }
   }
@@ -586,6 +608,13 @@ void FleetManager::track_task(Vehicle & vehicle, TimePoint now)
         const std::string why = "action " + found->action_type + " failed" +
           (found->result_description ? ": " + *found->result_description : std::string());
         finish_task(*task, TaskState::Failed, why, now);
+        // Whatever is left of the order belonged to the failed task. The
+        // vehicle is stopped rather than left to drive on to where nobody
+        // wants it any more.
+        if (!clean_idle(vehicle.state) || vehicle.pending) {
+          resynchronize(vehicle, "task failed", now);
+          update_availability(vehicle, now);
+        }
         return;
       } else if (found->action_status != ActionStatus::Finished) {
         finished = false;
@@ -595,6 +624,7 @@ void FleetManager::track_task(Vehicle & vehicle, TimePoint now)
       return;
     }
     ++task->done;
+    plan_dirty_ = true;  // a stop is done: time to look at the way to the next
   }
   if (task->done == task->nodes.size()) {
     finish_task(*task, TaskState::Finished, "", now);
@@ -802,7 +832,9 @@ bool FleetManager::cancel(TaskId id, TimePoint now)
   Vehicle * vehicle =
     task->vehicle >= 0 ? vehicles_[static_cast<std::size_t>(task->vehicle)].get() : nullptr;
   finish_task(*task, TaskState::Cancelled, "", now);
-  if (vehicle != nullptr && vehicle->has_state && !clean_idle(vehicle->state)) {
+  if (vehicle != nullptr && vehicle->has_state &&
+    (!clean_idle(vehicle->state) || vehicle->pending))
+  {
     resynchronize(*vehicle, "task cancelled", now);
     update_availability(*vehicle, now);
   }
@@ -898,27 +930,84 @@ void FleetManager::replan(TimePoint now)
       for (std::size_t k = task->done; k < task->dispatched; ++k) {
         request.start_time += task->dwell[k];  // still busy at a stop
       }
-      // Actions for a stop go out with the order that brings the vehicle
-      // there, or with a new order if it is already there. A vehicle that is
-      // still finishing an order while standing at its next stop gets neither;
-      // it waits one round, until it has come to rest.
-      const bool at_next_stop = task->dispatched < task->nodes.size() &&
-        task->nodes[task->dispatched] == request.start_node;
-      if (at_next_stop && !settled(vehicle)) {
-        tasks_waiting_ = true;
-      } else {
-        for (std::size_t k = task->dispatched; k < task->nodes.size(); ++k) {
-          request.waypoints.push_back(Waypoint{task->nodes[k], task->dwell[k]});
-        }
-        request.priority =
-          -1e6 * task->request.priority + static_cast<double>(task->sequence);
+      for (std::size_t k = task->dispatched; k < task->nodes.size(); ++k) {
+        request.waypoints.push_back(Waypoint{task->nodes[k], task->dwell[k]});
       }
+      request.priority =
+        -1e6 * task->request.priority + static_cast<double>(task->sequence);
     }
     requests.push_back(std::move(request));
     planned.push_back(&vehicle);
   }
 
+  // Two vehicles that already hold conflicting resources: one was switched
+  // on, or found its position, next to another, or inside what another had
+  // been granted. No plan can undo that. Both stay where they are, and the
+  // rest of the fleet is planned around all that the two hold, until the
+  // conflict is over (a vehicle stopped on its way gives back what it does
+  // not need) or somebody moves one of them by hand.
+  std::vector<bool> conflicting(requests.size(), false);
+  for (std::size_t i = 0; i < requests.size(); ++i) {
+    for (std::size_t j = i + 1; j < requests.size(); ++j) {
+      bool overlap = false;
+      for (const ResourceId a : requests[i].held) {
+        for (const ResourceId b : requests[j].held) {
+          overlap = overlap || conflicts_.conflict(a, b);
+        }
+      }
+      if (overlap) {
+        conflicting[i] = true;
+        conflicting[j] = true;
+        if (!planned[i]->in_conflict || !planned[j]->in_conflict) {
+          event(
+            now, "claim_conflict", planned[i]->identity.serial_number,
+            "holds resources that conflict with those of " +
+            planned[j]->identity.serial_number);
+        }
+      }
+    }
+  }
+  for (std::size_t i = 0; i < requests.size(); ++i) {
+    if (planned[i]->in_conflict && !conflicting[i]) {
+      event(now, "claim_conflict_over", planned[i]->identity.serial_number, "");
+    }
+    planned[i]->in_conflict = conflicting[i];
+    if (conflicting[i]) {
+      requests[i].immobile = true;
+      requests[i].waypoints.clear();
+      tasks_waiting_ = true;
+    }
+  }
+
   FleetPlan plan = plan_fleet(roadmap_, conflicts_, requests, config_.planner);
+
+  // A task with several stops that cannot be routed as a whole is tried
+  // again up to its next stop only. Getting there is progress, and the
+  // stop's work can be done while the rest of the way is still closed. If
+  // that does not help anybody, the first plan stands.
+  const auto blocked_in = [](const FleetPlan & candidate) {
+      return std::count_if(
+        candidate.agents.begin(), candidate.agents.end(),
+        [](const AgentPlan & agent) {return agent.outcome == AgentOutcome::Blocked;});
+    };
+  std::vector<AgentRequest> shorter = requests;
+  bool shortened = false;
+  for (std::size_t i = 0; i < requests.size(); ++i) {
+    if (plan.agents[i].outcome == AgentOutcome::Blocked && requests[i].waypoints.size() > 1) {
+      shorter[i].waypoints.resize(1);
+      shortened = true;
+    }
+  }
+  if (shortened) {
+    FleetPlan second = plan_fleet(roadmap_, conflicts_, shorter, config_.planner);
+    plan.search_nodes += second.search_nodes;
+    if (blocked_in(second) < blocked_in(plan)) {
+      second.search_nodes = plan.search_nodes;
+      plan = std::move(second);
+      requests = std::move(shorter);
+      tasks_waiting_ = true;  // the rest of those tasks still has to be planned
+    }
+  }
   ++stats_.replans;
   stats_.searches += plan.search_nodes > 0 ? 1 : 0;
   last_plan_time_ = now;
@@ -1002,17 +1091,7 @@ void FleetManager::grant_and_send(TimePoint now)
     }
 
     if (vehicle.pending) {
-      if (now - vehicle.pending->sent_at >= config_.order_resend) {
-        // QoS 0 can lose a message. Sending the same order again is harmless:
-        // the vehicle ignores an order it already has.
-        transport_.publish(
-          vda5050_core::MqttMessage{
-            vda5050_core::topic_name(vehicle.identity, "order"), vehicle.pending->payload, 0,
-            false});
-        vehicle.pending->sent_at = now;
-        ++stats_.orders_resent;
-      }
-      continue;
+      continue;  // one order at a time; tick() sends it again if need be
     }
 
     // A vehicle that has come to rest starts its next order from scratch.
@@ -1026,13 +1105,23 @@ void FleetManager::grant_and_send(TimePoint now)
     }
 
     Task * task = find_task(vehicle.task);
-    while (!vehicle.plan.empty() && vehicle.committed.size() < config_.release_ahead) {
-      // Stops at the place the vehicle starts from must go out first, with a
-      // new order; they cannot be attached to a node it already has.
+    // A vehicle whose task has no route only has moves that make room for
+    // others. Those are handed out one at a time: what is granted cannot be
+    // taken back, and three steps of a detour that the next plan no longer
+    // wants would keep the very nodes occupied that somebody is waiting for.
+    const std::size_t ahead = vehicle.plan_blocked ? 1 : config_.release_ahead;
+    vehicle.closing = false;
+    while (!vehicle.plan.empty() && vehicle.committed.size() < ahead) {
+      // Actions for a stop go out with the order that brings the vehicle
+      // there, or with a new order if it is already there. A vehicle that
+      // will end its present order at its next stop without having been told
+      // so gets neither: it has to come to rest first. Its plan stands
+      // meanwhile, so that the others are planned around what it will do.
       if (!vehicle.plan_stop_after.empty() && vehicle.plan_stop_after.front() == 0 &&
         vehicle.journey_open)
       {
-        plan_dirty_ = true;
+        tasks_waiting_ = true;
+        vehicle.closing = true;
         break;
       }
       const PlannedMove & move = vehicle.plan.front();
@@ -1061,6 +1150,7 @@ void FleetManager::grant_and_send(TimePoint now)
       grant.to = move.to;
       vehicle.grant_sequence += 2;
       grant.sequence_to = vehicle.grant_sequence;
+      grant.task = vehicle.task;
       vehicle.plan.erase(vehicle.plan.begin());
       // Stops reached by this move are handed over with it.
       std::size_t at_start = 0;
@@ -1086,7 +1176,9 @@ void FleetManager::grant_and_send(TimePoint now)
     }
 
     std::vector<int> horizon;
-    for (std::size_t k = 0; k < vehicle.plan.size() && k < config_.horizon; ++k) {
+    for (std::size_t k = 0;
+      !vehicle.closing && k < vehicle.plan.size() && k < config_.horizon; ++k)
+    {
       horizon.push_back(vehicle.plan[k].edge);
     }
     const bool start_stops = !vehicle.journey_open && vehicle.committed.empty() &&
@@ -1187,7 +1279,9 @@ void FleetManager::send_order(Vehicle & vehicle, TimePoint now)
     vehicle.stitch_node = move.to;
     vehicle.stitch_sequence = move.sequence_to;
   }
-  for (std::size_t k = 0; k < vehicle.plan.size() && k < config_.horizon; ++k) {
+  for (std::size_t k = 0;
+    !vehicle.closing && k < vehicle.plan.size() && k < config_.horizon; ++k)
+  {
     sequence += 2;
     order.edges.push_back(edge_entry(vehicle.plan[k].edge, sequence - 1, false));
     order.nodes.push_back(node_entry(vehicle.plan[k].to, sequence, false));
@@ -1196,6 +1290,7 @@ void FleetManager::send_order(Vehicle & vehicle, TimePoint now)
 
   pending.payload = vda5050_core::encode_order(order);
   pending.update_id = vehicle.order_update_id;
+  pending.task = vehicle.task;
   pending.sent_at = now;
   transport_.publish(
     vda5050_core::MqttMessage{
@@ -1207,7 +1302,31 @@ void FleetManager::send_order(Vehicle & vehicle, TimePoint now)
 void FleetManager::tick(TimePoint now)
 {
   for (const std::unique_ptr<Vehicle> & vehicle : vehicles_) {
-    if (vehicle->needs_resync && vehicle->has_state && clean_idle(vehicle->state)) {
+    if (vehicle->pending && vehicle->online &&
+      now - vehicle->pending->sent_at >= config_.order_resend)
+    {
+      // QoS 0 can lose a message. Sending the same order again is harmless:
+      // the vehicle ignores an order it already has. This also goes for an
+      // order that is no longer wanted because the vehicle is to be stopped.
+      // It cannot be called back, and a cancellation that overtakes it would
+      // do nothing. So it is seen through: sent until the vehicle has it, and
+      // cancelled then. A vehicle that does not take it after several
+      // attempts never will.
+      if (vehicle->needs_resync && vehicle->pending->resent >= kStopAttempts) {
+        vehicle->pending.reset();
+      } else {
+        transport_.publish(
+          vda5050_core::MqttMessage{
+            vda5050_core::topic_name(vehicle->identity, "order"), vehicle->pending->payload, 0,
+            false});
+        vehicle->pending->sent_at = now;
+        ++vehicle->pending->resent;
+        ++stats_.orders_resent;
+      }
+    }
+    if (vehicle->needs_resync && !vehicle->pending && vehicle->has_state &&
+      clean_idle(vehicle->state))
+    {
       finish_resynchronization(*vehicle, now);
     }
     update_availability(*vehicle, now);

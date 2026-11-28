@@ -22,6 +22,12 @@
 //      of resolving it (this one gives way / that one gives way) and continues
 //      with the cheaper total. It is bounded by a node budget; if the budget
 //      runs out, the result of stage 1 stands.
+//   3. If a robot with a task still has no route: one step. The robot is
+//      moved one node towards its goal, and whoever stands in that node is
+//      first moved one node on, and so on down the line ("pushing"). This is
+//      not a route to the goal, only progress; planning is repeated when the
+//      step is done. It is what keeps a crowded one-way loop turning when no
+//      complete set of routes can be found.
 //
 // What a robot holds, and when (this is the contract with the executor):
 //   - While it stands at a node it holds that node.
@@ -103,6 +109,9 @@ struct RouteRequest
   /// stay put, then parking nodes.
   std::vector<Waypoint> waypoints;
   double speed{0.0};       ///< m/s; 0 uses PlannerConfig::default_speed.
+  /// Only for a robot without waypoints: nodes it may not choose to rest at
+  /// (indexed by node; empty = no restriction).
+  std::vector<bool> avoid_rest;
   /// Extra reservations that apply to this robot only, whoever made them.
   /// Used by the conflict-based search to make one robot give way.
   std::vector<std::pair<ResourceId, TimeInterval>> give_way;
@@ -167,6 +176,7 @@ struct FleetPlan
   std::size_t attempts{0};        ///< Prioritized passes needed (1 = first order worked).
   std::size_t search_nodes{0};    ///< Nodes the conflict-based search expanded (0 = not run).
   bool from_search{false};        ///< The plan is the result of the search.
+  std::size_t nudged{0};          ///< Robots moved one step by stage 3.
 };
 
 /// Plan every robot. Never fails: a robot without a route to its waypoints is

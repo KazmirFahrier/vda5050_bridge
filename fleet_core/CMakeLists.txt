@@ -66,6 +66,7 @@ if(BUILD_TESTING)
     test/test_roadmap.cpp
     test/test_planner.cpp
     test/test_fleet_sim.cpp
+    test/test_fleet_robustness.cpp
   )
 
   if(ament_cmake_FOUND)

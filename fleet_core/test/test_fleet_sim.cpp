@@ -21,7 +21,7 @@ FleetConfig fleet_config()
 {
   FleetConfig config;
   config.vehicle_radius = 0.4;
-  config.safety_margin = 0.2;   // clearance 1.0 m, as in the planner tests
+  config.attach_tolerance = 0.25;  // distance kept: 2 * 0.4 + 2 * 0.25 = 1.3 m
   config.planner.default_speed = 1.0;
   config.planner.node_overhead = 0.5;
   config.state_timeout = std::chrono::milliseconds(20000);
@@ -131,7 +131,7 @@ TEST(FleetSim, TwoVehiclesMeetingHeadOnPassAtTheSiding)
   EXPECT_EQ(node_of(world, "v1"), "E");
   EXPECT_EQ(node_of(world, "v2"), "A");
   EXPECT_EQ(world.fleet().stats().tasks_finished, 2u);
-  EXPECT_GE(world.closest_approach(), 0.8);
+  EXPECT_GE(world.closest_approach(), 1.3);  // the distance the configuration asks for
   expect_clean(world);
 }
 

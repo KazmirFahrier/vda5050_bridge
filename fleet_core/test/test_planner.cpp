@@ -403,14 +403,129 @@ TEST_F(FleetPlanTest, WhatARobotStillHoldsIsRespectedUntilItArrives)
   EXPECT_TRUE(result.agents[1].plan.moves.empty());             // idle: stays at D
 }
 
-TEST_F(FleetPlanTest, PriorityDecidesWhoGoesFirst)
+TEST_F(FleetPlanTest, PriorityDecidesWhoCrossesFirst)
 {
+  // Two robots whose ways cross in the middle of a 3 x 3 grid, equally far
+  // from the crossing. Whoever is more urgent goes through without waiting.
+  const Roadmap grid = test_maps::grid(3, 3);
+  const ConflictTable grid_conflicts(grid, test_maps::kClearance);
+  for (const int urgent : {1, 2}) {
+    AgentRequest across = agent(grid, 1, "0,1", "2,1");
+    AgentRequest up = agent(grid, 2, "1,0", "1,2");
+    across.priority = urgent == 1 ? -1.0 : 1.0;
+    up.priority = urgent == 2 ? -1.0 : 1.0;
+    const std::vector<AgentRequest> requests{across, up};
+    const FleetPlan result = plan_fleet(grid, grid_conflicts, requests, config());
+    EXPECT_EQ(validate_fleet_plan(grid, grid_conflicts, requests, result), "");
+    const double first = result.agents[static_cast<std::size_t>(urgent - 1)].plan.finish_time;
+    const double second = result.agents[static_cast<std::size_t>(2 - urgent)].plan.finish_time;
+    EXPECT_DOUBLE_EQ(first, 6.0);  // two edges, no waiting
+    EXPECT_GT(second, 6.0);
+  }
+}
+
+TEST_F(FleetPlanTest, SearchAloneAlsoSolvesTheHeadOnMeetingAndFavoursTheUrgentRobot)
+{
+  PlannerConfig only_search = config();
+  only_search.order_attempts = 1;  // stage 1 with the natural order only
   AgentRequest urgent = agent(map, 2, "E", "A");
   urgent.priority = -1.0;
-  const FleetPlan result = plan({agent(map, 1, "A", "E"), urgent});
+  const std::vector<AgentRequest> requests{agent(map, 1, "A", "E"), urgent};
+
+  const FleetPlan result = plan_fleet(map, conflicts, requests, only_search);
+  EXPECT_EQ(validate_fleet_plan(map, conflicts, requests, result), "");
+  EXPECT_TRUE(result.from_search);
+  EXPECT_GT(result.search_nodes, 0u);
+  EXPECT_LE(result.search_nodes, only_search.search_budget);
   // The urgent robot drives straight through; the other one uses the siding.
   EXPECT_EQ(path_of(map, node(map, "E"), result.agents[1].plan), "E>D>C>B>A");
   EXPECT_NE(path_of(map, node(map, "A"), result.agents[0].plan).find("S"), std::string::npos);
+
+  // Without the search, and without trying other orders, nobody gets a full
+  // route; the last stage then at least moves both one step.
+  only_search.search_budget = 0;
+  const FleetPlan stuck = plan_fleet(map, conflicts, requests, only_search);
+  EXPECT_EQ(validate_fleet_plan(map, conflicts, requests, stuck), "");
+  EXPECT_TRUE(stuck.agents[0].outcome == AgentOutcome::Blocked);
+  EXPECT_TRUE(stuck.agents[1].outcome == AgentOutcome::Blocked);
+  EXPECT_FALSE(stuck.from_search);
+}
+
+TEST(FleetPlanLoop, IdleRobotsAheadOnAOneWayLoopAreMovedOnAsAConvoy)
+{
+  // A one-way loop of 10 nodes. The robot at R9 must go to R6; three idle
+  // robots stand ahead of it at R0, R2 and R3 and cannot be overtaken. They
+  // all have to move on, the front one first, and end where the first robot
+  // does not need to go: R7, R8 and R9 (which it leaves).
+  const Roadmap loop = test_maps::one_way_ring(10);
+  const ConflictTable loop_conflicts(loop, 1.3);
+  const std::vector<AgentRequest> requests{
+    agent(loop, 1, "R3"), agent(loop, 2, "R2"), agent(loop, 3, "R0"),
+    agent(loop, 4, "R9", "R6")};
+  const FleetPlan result = plan_fleet(loop, loop_conflicts, requests, config());
+  EXPECT_EQ(validate_fleet_plan(loop, loop_conflicts, requests, result), "");
+  for (const AgentPlan & item : result.agents) {
+    EXPECT_TRUE(item.outcome == AgentOutcome::Planned);
+  }
+  EXPECT_EQ(loop.node(result.agents[3].plan.moves.back().to).id, "R6");
+  EXPECT_EQ(loop.node(result.agents[0].plan.moves.back().to).id, "R9");
+  EXPECT_EQ(loop.node(result.agents[1].plan.moves.back().to).id, "R8");
+  EXPECT_EQ(loop.node(result.agents[2].plan.moves.back().to).id, "R7");
+  EXPECT_EQ(result.search_nodes, 0u);  // found by ordering, not by search
+}
+
+TEST(FleetPlanLoop, WhenNoFullRouteIsFoundRobotsAreMovedOneStep)
+{
+  // The same loop, but now the robot at R3 must go almost all the way round,
+  // through the three others. No complete set of routes is found within the
+  // budget; stage 3 moves it one node, which is progress.
+  const Roadmap loop = test_maps::one_way_ring(10);
+  const ConflictTable loop_conflicts(loop, 1.3);
+  AgentRequest far = agent(loop, 1, "R3", "R1");
+  far.waypoints.front().dwell = 5.0;
+  const std::vector<AgentRequest> requests{
+    far, agent(loop, 2, "R2"), agent(loop, 3, "R0"), agent(loop, 4, "R9")};
+  const FleetPlan result = plan_fleet(loop, loop_conflicts, requests, config());
+  EXPECT_EQ(validate_fleet_plan(loop, loop_conflicts, requests, result), "");
+  if (result.agents[0].outcome == AgentOutcome::Blocked) {
+    EXPECT_EQ(result.nudged, 1u);
+    ASSERT_EQ(result.agents[0].plan.moves.size(), 1u);
+    EXPECT_EQ(loop.node(result.agents[0].plan.moves[0].to).id, "R4");
+  }
+}
+
+TEST(FleetPlanPush, ARobotWorkingAtItsStopIsNotPushedAway)
+{
+  // Both have the same stop; one is already there. The other one cannot be
+  // routed (the stop stays taken as far as this plan can see), and the one
+  // at work must not be shoved aside to make room.
+  const Roadmap grid = test_maps::grid(3, 2);
+  const ConflictTable grid_conflicts(grid, 1.3);
+  const std::vector<AgentRequest> requests{
+    agent(grid, 1, "2,0", "2,1"), agent(grid, 2, "2,1", "2,1")};
+  const FleetPlan result = plan_fleet(grid, grid_conflicts, requests, PlannerConfig{});
+  EXPECT_EQ(validate_fleet_plan(grid, grid_conflicts, requests, result), "");
+  EXPECT_TRUE(result.agents[0].outcome == AgentOutcome::Blocked);
+  EXPECT_TRUE(result.agents[1].outcome == AgentOutcome::Planned);
+  EXPECT_TRUE(result.agents[1].plan.moves.empty());
+}
+
+TEST(FleetPlanPush, ARestingIdleRobotIsPushedOnByAnotherIdleRobot)
+{
+  // Corridor A-B-C-D-E, no siding. A robot drives A>C and stays. Idle robots
+  // stand at B and C. The one at C must leave; the nearest resting place, D,
+  // is where... nobody is yet, so it goes there. The one at B must leave too,
+  // towards D: it pushes the first idle robot on to E.
+  const Roadmap map = test_maps::corridor();
+  const ConflictTable conflicts(map, test_maps::kClearance);
+  const std::vector<AgentRequest> requests{
+    agent(map, 1, "A", "C"), agent(map, 2, "C"), agent(map, 3, "B")};
+  const FleetPlan result = plan_fleet(map, conflicts, requests, config());
+  EXPECT_EQ(validate_fleet_plan(map, conflicts, requests, result), "");
+  EXPECT_TRUE(result.agents[0].outcome == AgentOutcome::Planned);
+  EXPECT_EQ(path_of(map, node(map, "A"), result.agents[0].plan), "A>B>C");
+  EXPECT_EQ(path_of(map, node(map, "C"), result.agents[1].plan), "C>D>E");
+  EXPECT_EQ(path_of(map, node(map, "B"), result.agents[2].plan), "B>C>D");
 }
 
 // ------------------------------------------------------------ the checker ----

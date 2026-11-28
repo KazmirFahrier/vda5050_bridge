@@ -72,6 +72,19 @@ public:
 
   std::optional<Plan> run()
   {
+    return search();
+  }
+
+  std::size_t expansions() const noexcept {return expansions_;}
+
+private:
+  bool may_rest_at(int node) const
+  {
+    return request_.avoid_rest.empty() || !request_.avoid_rest[static_cast<std::size_t>(node)];
+  }
+
+  std::optional<Plan> search()
+  {
     const std::vector<TimeInterval> & start_intervals =
       intervals(roadmap_.node_resource(request_.start_node));
     std::optional<std::size_t> start_interval;
@@ -106,7 +119,7 @@ public:
       }
       closed_[static_cast<std::size_t>(index)] = true;
 
-      const bool can_stay =
+      const bool can_stay = may_rest_at(state.node) &&
         intervals(roadmap_.node_resource(state.node))[state.interval].end == kForever;
       if (rest_anywhere) {
         if (priority >= best_rest_cost) {
@@ -139,9 +152,6 @@ public:
     return build(best_rest);
   }
 
-  std::size_t expansions() const noexcept {return expansions_;}
-
-private:
   const std::vector<TimeInterval> & intervals(ResourceId resource)
   {
     const std::size_t index = static_cast<std::size_t>(resource);
@@ -420,15 +430,31 @@ RouteRequest route_request(const AgentRequest & request)
   return route;
 }
 
-/// The robots that can move, in the order in which pass number `variant` of
-/// stage 1 plans them. Variant 0 is the natural order: by priority. Variant 1
-/// keeps the robots with tasks in that order and reverses the idle ones
-/// (which of two idle robots moves first often decides whether both can get
-/// out of the way). Later variants are fixed shuffles of all of them.
-std::vector<std::size_t> planning_order(
-  const std::vector<AgentRequest> & requests, std::size_t variant)
+/// How one pass of stage 1 goes about it.
+struct PassSetup
 {
   std::vector<std::size_t> order;
+  /// Nodes idle robots should not rest at in this pass (empty: anywhere).
+  std::vector<bool> avoid_rest;
+};
+
+/// The set-up of pass number `variant` of stage 1.
+///   0  The natural order: by priority, idle robots last.
+///   1  "Clear the way, then drive as a convoy". Each robot with a task is
+///      first routed alone, as if the map were empty. Idle robots are then
+///      planned FIRST, and asked to rest away from those routes; the robots
+///      with tasks follow, the one with the most free road ahead first. This
+///      is what the natural order cannot do: there, the robot at the back
+///      fixes its timetable first, and the ones in front of it cannot keep it.
+///   2  The natural order with the idle robots reversed.
+///   3  The natural order with the robots that have tasks reversed.
+///   4+ Fixed shuffles of all of them.
+PassSetup pass_setup(
+  const Roadmap & roadmap, const ConflictTable & conflicts,
+  const std::vector<AgentRequest> & requests, const PlannerConfig & config, std::size_t variant)
+{
+  PassSetup setup;
+  std::vector<std::size_t> & order = setup.order;
   for (std::size_t i = 0; i < requests.size(); ++i) {
     if (!requests[i].immobile) {
       order.push_back(i);
@@ -438,12 +464,49 @@ std::vector<std::size_t> planning_order(
     order.begin(), order.end(), [&requests](std::size_t a, std::size_t b) {
       return requests[a].priority < requests[b].priority;
     });
+  const auto first_idle = std::find_if(
+    order.begin(), order.end(),
+    [&requests](std::size_t i) {return requests[i].waypoints.empty();});
+
   if (variant == 1) {
-    const auto first_idle = std::find_if(
-      order.begin(), order.end(),
-      [&requests](std::size_t i) {return requests[i].waypoints.empty();});
+    std::vector<double> free_road(requests.size(), 0.0);
+    setup.avoid_rest.assign(static_cast<std::size_t>(roadmap.node_count()), false);
+    const ReservationTable empty(conflicts);
+    for (const std::size_t i : order) {
+      if (requests[i].waypoints.empty()) {
+        continue;
+      }
+      const std::optional<Plan> alone =
+        plan_route(roadmap, empty, route_request(requests[i]), config);
+      if (!alone) {
+        continue;
+      }
+      bool road_is_free = true;
+      for (const PlannedMove & move : alone->moves) {
+        const bool occupied = std::any_of(
+          requests.begin(), requests.end(), [&](const AgentRequest & other) {
+            return other.robot != requests[i].robot && other.start_node == move.to;
+          });
+        road_is_free = road_is_free && !occupied;
+        free_road[i] += road_is_free ? 1.0 : 0.0;
+        // Every node this robot comes to is a poor place for an idle one.
+        for (const ResourceId near : conflicts.conflicts(roadmap.node_resource(move.to))) {
+          if (roadmap.is_node(near)) {
+            setup.avoid_rest[static_cast<std::size_t>(near)] = true;
+          }
+        }
+      }
+    }
+    std::stable_sort(
+      order.begin(), first_idle, [&free_road](std::size_t a, std::size_t b) {
+        return free_road[a] > free_road[b];
+      });
+    std::rotate(order.begin(), first_idle, order.end());  // idle robots first
+  } else if (variant == 2) {
     std::reverse(first_idle, order.end());
-  } else if (variant > 1) {
+  } else if (variant == 3) {
+    std::reverse(order.begin(), first_idle);
+  } else if (variant > 3) {
     // A small linear congruential generator: the same shuffle every time.
     std::uint64_t state = 0x9E3779B97F4A7C15ull * (variant + 1) + requests.size();
     for (std::size_t i = order.size(); i > 1; --i) {
@@ -451,7 +514,7 @@ std::vector<std::size_t> planning_order(
       std::swap(order[i - 1], order[static_cast<std::size_t>((state >> 33) % i)]);
     }
   }
-  return order;
+  return setup;
 }
 
 bool overlap(const Holding & a, const Holding & b)
@@ -473,9 +536,10 @@ public:
   OrderedPass(
     const Roadmap & roadmap, const ConflictTable & conflicts,
     const std::vector<AgentRequest> & requests, const PlannerConfig & config,
-    const std::vector<int> & step)
+    const std::vector<int> & step, const std::vector<bool> & avoid_rest)
   : roadmap_(roadmap), conflicts_(conflicts), requests_(requests), config_(config),
-    step_(step), plans_(requests.size()), placed_(requests.size(), false) {}
+    step_(step), avoid_rest_(avoid_rest), plans_(requests.size()),
+    placed_(requests.size(), false) {}
 
   /// Plan robot `i` from scratch. False if it has no route.
   bool place(std::size_t i)
@@ -483,6 +547,7 @@ public:
     RouteRequest route = route_request(requests_[i]);
     if (idle_like(i)) {
       route.waypoints.clear();
+      route.avoid_rest = avoid_rest_;
     }
     return place(i, route, Plan{}, 0);
   }
@@ -545,8 +610,23 @@ private:
   }
 
   /// Find a route for robot `i` that continues `prefix`, and make room for it
-  /// if need be.
+  /// if need be. An idle robot first looks for a resting place away from the
+  /// others' routes (pushing others on if it must), and only then for any
+  /// resting place at all.
   bool place(std::size_t i, const RouteRequest & route, const Plan & prefix, int depth)
+  {
+    if (!route.avoid_rest.empty()) {
+      if (place_once(i, route, prefix, depth)) {
+        return true;
+      }
+      RouteRequest anywhere = route;
+      anywhere.avoid_rest.clear();
+      return place_once(i, anywhere, prefix, depth);
+    }
+    return place_once(i, route, prefix, depth);
+  }
+
+  bool place_once(std::size_t i, const RouteRequest & route, const Plan & prefix, int depth)
   {
     const auto adopt = [&](const Plan & found) {
         Plan whole = prefix;
@@ -595,6 +675,7 @@ private:
         continue;
       }
       RouteRequest onward;
+      onward.avoid_rest = avoid_rest_;
       onward.robot = requests_[j].robot;
       onward.speed = requests_[j].speed;
       onward.start_node = plans_[j].moves.empty() ?
@@ -619,6 +700,7 @@ private:
   const std::vector<AgentRequest> & requests_;
   const PlannerConfig & config_;
   const std::vector<int> & step_;
+  const std::vector<bool> & avoid_rest_;
   std::vector<Plan> plans_;
   std::vector<bool> placed_;
 };
@@ -626,26 +708,35 @@ private:
 FleetPlan plan_in_order(
   const Roadmap & roadmap, const ConflictTable & conflicts,
   const std::vector<AgentRequest> & requests, const PlannerConfig & config,
-  std::vector<std::size_t> order)
+  const PassSetup & setup)
 {
+  std::vector<std::size_t> order = setup.order;
   const std::size_t count = requests.size();
   FleetPlan result;
   result.agents.resize(count);
 
-  // Repair. A robot that finds no route climbs one step at a time:
-  //   1. it is moved to the front (it may only have been boxed in by robots
-  //      planned before it);
-  //   2. its task is set aside for this round and it is planned like an idle
-  //      robot, free to go wherever it is out of the way;
-  //   3. the same, from the front;
-  //   4. it stays where it is for good, and the others plan around it.
-  // Each failure moves exactly one robot one step, so this ends after at most
-  // 4 * count + 1 passes, and what comes out is always a valid plan.
+  // Repair. When a robot finds no route, one thing is changed and the pass
+  // starts again:
+  //   1. the robot is moved to the front (it may only have been boxed in by
+  //      robots planned before it);
+  //   2. failing again, its task is set aside for this round: it is planned
+  //      like an idle robot, free to go wherever it is out of the way;
+  //   3. failing even so, the cause lies with the others' tasks: the task of
+  //      the least urgent robot that still has one is set aside;
+  //   4. only when nobody has a task left does the robot "stay": it keeps its
+  //      node for good and the others plan around it.
+  // Tasks are given up before anybody is made to stay, because a robot that
+  // stays can block everybody (think of a one-way loop), while an idle one
+  // gives way. Each restart changes one robot once, so there are at most
+  // 3 * count + 1 passes, and what comes out is always a valid plan.
   std::vector<int> step(count, 0);
+  const auto has_task = [&](std::size_t i) {
+      return !requests[i].waypoints.empty() && step[i] < OrderedPass::kSetAside;
+    };
 
   while (true) {
     ++result.attempts;
-    OrderedPass pass(roadmap, conflicts, requests, config, step);
+    OrderedPass pass(roadmap, conflicts, requests, config, step, setup.avoid_rest);
     std::optional<std::size_t> failed;
     for (const std::size_t i : order) {
       if (step[i] != OrderedPass::kStays && !pass.place(i)) {
@@ -669,12 +760,27 @@ FleetPlan plan_in_order(
       return result;
     }
 
-    ++step[*failed];
-    if (step[*failed] == OrderedPass::kMovedUp ||
-      step[*failed] == OrderedPass::kSetAsideMovedUp)
-    {
-      order.erase(std::find(order.begin(), order.end(), *failed));
-      order.insert(order.begin(), *failed);
+    const std::size_t i = *failed;
+    if (step[i] == 0) {
+      step[i] = OrderedPass::kMovedUp;
+      order.erase(std::find(order.begin(), order.end(), i));
+      order.insert(order.begin(), i);
+    } else if (has_task(i)) {
+      step[i] = OrderedPass::kSetAsideMovedUp;
+    } else {
+      std::optional<std::size_t> victim;
+      for (const std::size_t j : order) {
+        if (j != i && has_task(j) &&
+          (!victim || requests[j].priority >= requests[*victim].priority))
+        {
+          victim = j;
+        }
+      }
+      if (victim) {
+        step[*victim] = OrderedPass::kSetAside;
+      } else {
+        step[i] = OrderedPass::kStays;
+      }
     }
   }
 }
@@ -703,6 +809,26 @@ void retry_blocked(
       plan.agents[i].plan = std::move(*better);
     }
   }
+}
+
+/// How long a second of each robot's time counts: between 2 for the most
+/// urgent and 1 for the least. Used wherever plans are compared, so that when
+/// somebody has to give way it is, if possible, the less urgent robot.
+std::vector<double> priority_weights(const std::vector<AgentRequest> & requests)
+{
+  std::vector<std::size_t> order(requests.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  std::stable_sort(
+    order.begin(), order.end(), [&requests](std::size_t a, std::size_t b) {
+      return requests[a].priority < requests[b].priority;
+    });
+  std::vector<double> weight(requests.size(), 1.0);
+  for (std::size_t rank = 0; rank < order.size(); ++rank) {
+    weight[order[rank]] = 2.0 - static_cast<double>(rank) / static_cast<double>(order.size());
+  }
+  return weight;
 }
 
 // ------------------------------------------------ conflict-based search ----
@@ -747,21 +873,7 @@ public:
     set_aside_(requests.size(), false), stays_(requests.size(), false),
     weight_(requests.size(), 1.0)
   {
-    // A second of a high-priority robot counts for more than a second of a
-    // low-priority one (between 2 and 1), so that when somebody has to give
-    // way, the search prefers it to be the less urgent robot.
-    std::vector<std::size_t> order(requests.size());
-    for (std::size_t i = 0; i < order.size(); ++i) {
-      order[i] = i;
-    }
-    std::stable_sort(
-      order.begin(), order.end(), [&requests](std::size_t a, std::size_t b) {
-        return requests[a].priority < requests[b].priority;
-      });
-    for (std::size_t rank = 0; rank < order.size(); ++rank) {
-      weight_[order[rank]] =
-        2.0 - static_cast<double>(rank) / static_cast<double>(order.size());
-    }
+    weight_ = priority_weights(requests);
     // Long enough for a resting robot to drive off along any one edge.
     for (int edge = 0; edge < roadmap.edge_count(); ++edge) {
       patience_ = std::max(patience_, travel_time(roadmap.edge(edge), 0.0, config));
@@ -1005,29 +1117,208 @@ std::size_t blocked_count(const FleetPlan & plan)
   return count;
 }
 
+double weighted_cost(const std::vector<AgentRequest> & requests, const FleetPlan & plan)
+{
+  const std::vector<double> weight = priority_weights(requests);
+  double cost = 0.0;
+  for (std::size_t i = 0; i < requests.size(); ++i) {
+    cost += weight[i] * plan.agents[i].plan.finish_time;
+  }
+  return cost;
+}
+
 FleetPlan plan_prioritized(
   const Roadmap & roadmap, const ConflictTable & conflicts,
   const std::vector<AgentRequest> & requests, const PlannerConfig & config)
 {
   FleetPlan best;
+  double best_cost = kForever;
   std::size_t passes = 0;
   for (std::size_t variant = 0; variant < std::max<std::size_t>(1, config.order_attempts);
     ++variant)
   {
     FleetPlan candidate =
-      plan_in_order(roadmap, conflicts, requests, config, planning_order(requests, variant));
+      plan_in_order(
+      roadmap, conflicts, requests, config,
+      pass_setup(roadmap, conflicts, requests, config, variant));
     retry_blocked(roadmap, conflicts, requests, config, candidate);
     passes += candidate.attempts;
-    if (variant == 0 || blocked_count(candidate) < blocked_count(best)) {
+    // Fewest robots without a route wins; among equals, the plan that costs
+    // the urgent robots least.
+    const double cost = weighted_cost(requests, candidate);
+    if (variant == 0 || blocked_count(candidate) < blocked_count(best) ||
+      (blocked_count(candidate) == blocked_count(best) && cost < best_cost - kEpsilon))
+    {
       best = std::move(candidate);
+      best_cost = cost;
     }
-    if (blocked_count(best) == 0) {
-      break;
+    if (variant == 0 && blocked_count(best) == 0) {
+      break;  // the natural order worked: nothing to compare
     }
   }
   best.attempts = passes;
   return best;
 }
+
+// ------------------------------------------------------- stage 3: a step ----
+
+/// Moves robots one node at a time when no complete routes were found.
+class Nudge
+{
+public:
+  Nudge(
+    const Roadmap & roadmap, const ConflictTable & conflicts,
+    const std::vector<AgentRequest> & requests, const PlannerConfig & config, FleetPlan & plan)
+  : roadmap_(roadmap), conflicts_(conflicts), requests_(requests), config_(config),
+    plan_(plan) {}
+
+  void run()
+  {
+    std::vector<std::size_t> order(requests_.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+      order[i] = i;
+    }
+    std::stable_sort(
+      order.begin(), order.end(), [this](std::size_t a, std::size_t b) {
+        return requests_[a].priority < requests_[b].priority;
+      });
+    for (const std::size_t i : order) {
+      const AgentPlan & agent = plan_.agents[i];
+      if (agent.outcome != AgentOutcome::Blocked || requests_[i].waypoints.empty() ||
+        !agent.plan.moves.empty())
+      {
+        continue;
+      }
+      // The first step of the shortest way to its next stop.
+      const std::vector<double> to_goal = travel_times_to(
+        roadmap_, requests_[i].waypoints.front().node, requests_[i].speed, config_);
+      int next = -1;
+      double best = kForever;
+      for (const int edge_index : roadmap_.out_edges(requests_[i].start_node)) {
+        const MapEdge & edge = roadmap_.edge(edge_index);
+        const double cost = travel_time(edge, requests_[i].speed, config_) +
+          to_goal[static_cast<std::size_t>(edge.to)];
+        if (cost < best) {
+          best = cost;
+          next = edge.to;
+        }
+      }
+      if (next < 0) {
+        continue;
+      }
+      const std::vector<Plan> saved = plans();
+      std::vector<bool> in_chain(requests_.size(), false);
+      if (step(i, next, in_chain, 0)) {
+        ++plan_.nudged;
+      } else {
+        restore(saved);
+      }
+    }
+  }
+
+private:
+  static constexpr int kMaxChain = 8;
+
+  std::vector<Plan> plans() const
+  {
+    std::vector<Plan> result;
+    for (const AgentPlan & agent : plan_.agents) {
+      result.push_back(agent.plan);
+    }
+    return result;
+  }
+  void restore(const std::vector<Plan> & saved)
+  {
+    for (std::size_t i = 0; i < saved.size(); ++i) {
+      plan_.agents[i].plan = saved[i];
+    }
+  }
+
+  /// Move robot `i` to the neighbouring node `to`, where it must be able to
+  /// stay; whoever rests there is moved on first.
+  bool step(std::size_t i, int to, std::vector<bool> & in_chain, int depth)
+  {
+    if (depth > kMaxChain) {
+      return false;
+    }
+    in_chain[i] = true;
+    const ResourceId target = roadmap_.node_resource(to);
+    for (std::size_t j = 0; j < requests_.size(); ++j) {
+      if (j == i) {
+        continue;
+      }
+      // Does robot j end its plan resting on something that conflicts with `to`?
+      const bool planned = plan_.agents[j].outcome != AgentOutcome::Immobile;
+      const std::vector<Holding> theirs =
+        holdings(roadmap_, requests_[j], planned ? &plan_.agents[j].plan : nullptr);
+      const bool rests_there = std::any_of(
+        theirs.begin(), theirs.end(), [&](const Holding & item) {
+          return item.end == kForever && conflicts_.conflict(item.resource, target);
+        });
+      if (!rests_there) {
+        continue;
+      }
+      // Only a robot that is standing still with nothing planned can be
+      // pushed, and not one that stands where its own task wants it.
+      const bool at_work = plan_.agents[j].outcome == AgentOutcome::Planned &&
+        !requests_[j].waypoints.empty();
+      if (requests_[j].immobile || in_chain[j] || !plan_.agents[j].plan.moves.empty() ||
+        requests_[j].start_time > 0.0 || at_work)
+      {
+        return false;
+      }
+      bool moved = false;
+      for (const int edge_index : roadmap_.out_edges(requests_[j].start_node)) {
+        const int onward = roadmap_.edge(edge_index).to;
+        const bool taken_by_chain = std::any_of(
+          requests_.begin(), requests_.end(), [&](const AgentRequest & other) {
+            const std::size_t k = static_cast<std::size_t>(&other - requests_.data());
+            return in_chain[k] && other.start_node == onward;
+          });
+        if (taken_by_chain) {
+          continue;
+        }
+        const std::vector<Plan> saved = plans();
+        std::vector<bool> chain = in_chain;
+        if (step(j, onward, chain, depth + 1)) {
+          moved = true;
+          break;
+        }
+        restore(saved);
+      }
+      if (!moved) {
+        return false;
+      }
+    }
+
+    // The way is as clear as it will get: one move, around everything the
+    // others now plan to do.
+    ReservationTable table(conflicts_);
+    for (std::size_t j = 0; j < requests_.size(); ++j) {
+      if (j != i) {
+        const bool planned = plan_.agents[j].outcome != AgentOutcome::Immobile;
+        reserve_all(
+          table, holdings(roadmap_, requests_[j], planned ? &plan_.agents[j].plan : nullptr),
+          requests_[j].robot);
+      }
+    }
+    RouteRequest route = route_request(requests_[i]);
+    route.waypoints = {Waypoint{to, 0.0}};
+    std::optional<Plan> found = plan_route(roadmap_, table, route, config_);
+    if (!found || found->moves.size() != 1) {
+      return false;  // only a single step counts; a detour is the planners' business
+    }
+    found->waypoint_after_moves.clear();
+    plan_.agents[i].plan = std::move(*found);
+    return true;
+  }
+
+  const Roadmap & roadmap_;
+  const ConflictTable & conflicts_;
+  const std::vector<AgentRequest> & requests_;
+  const PlannerConfig & config_;
+  FleetPlan & plan_;
+};
 
 }  // namespace
 
@@ -1035,22 +1326,24 @@ FleetPlan plan_fleet(
   const Roadmap & roadmap, const ConflictTable & conflicts,
   const std::vector<AgentRequest> & requests, const PlannerConfig & config)
 {
-  FleetPlan prioritized = plan_prioritized(roadmap, conflicts, requests, config);
-  if (blocked_count(prioritized) == 0 || config.search_budget == 0) {
-    return prioritized;
-  }
-  FleetSearch search(roadmap, conflicts, requests, config);
-  std::optional<FleetPlan> found = search.run();
-  prioritized.search_nodes = search.expanded();
-  if (found) {
-    retry_blocked(roadmap, conflicts, requests, config, *found);
-    if (blocked_count(*found) < blocked_count(prioritized)) {
-      found->attempts = prioritized.attempts;
-      found->search_nodes = search.expanded();
-      return *found;
+  FleetPlan best = plan_prioritized(roadmap, conflicts, requests, config);
+  if (blocked_count(best) > 0 && config.search_budget > 0) {
+    FleetSearch search(roadmap, conflicts, requests, config);
+    std::optional<FleetPlan> found = search.run();
+    best.search_nodes = search.expanded();
+    if (found) {
+      retry_blocked(roadmap, conflicts, requests, config, *found);
+      if (blocked_count(*found) < blocked_count(best)) {
+        found->attempts = best.attempts;
+        found->search_nodes = search.expanded();
+        best = std::move(*found);
+      }
     }
   }
-  return prioritized;
+  if (blocked_count(best) > 0) {
+    Nudge(roadmap, conflicts, requests, config, best).run();
+  }
+  return best;
 }
 
 std::string validate_fleet_plan(
@@ -1120,6 +1413,9 @@ std::string validate_fleet_plan(
   }
   for (std::size_t i = 0; i < all.size(); ++i) {
     for (std::size_t j = i + 1; j < all.size(); ++j) {
+      if (requests[i].immobile && requests[j].immobile) {
+        continue;  // neither moves: whatever they hold is not the plan's doing
+      }
       for (const Holding & a : all[i]) {
         for (const Holding & b : all[j]) {
           if (!conflicts.conflict(a.resource, b.resource)) {
