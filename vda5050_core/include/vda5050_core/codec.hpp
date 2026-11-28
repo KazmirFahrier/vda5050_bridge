@@ -44,6 +44,23 @@ std::string encode_visualization(const Visualization & visualization);
 /// Encode a `factsheet` topic payload.
 std::string encode_factsheet(const Factsheet & factsheet);
 
+// ---- The other direction: what master control writes and reads ------------
+// A fleet manager sends orders and instant actions and receives state and
+// connection messages. These are the inverses of the functions above.
+
+/// Encode an `order` topic payload.
+std::string encode_order(const Order & order);
+
+/// Encode an `instantActions` topic payload.
+std::string encode_instant_actions(const InstantActions & instant_actions);
+
+/// Decode a `state` topic payload. Fields the fleet manager does not depend
+/// on (battery, safety state, velocity) may be absent and keep their defaults.
+State decode_state(std::string_view payload);
+
+/// Decode a `connection` topic payload.
+Connection decode_connection(std::string_view payload);
+
 // String forms of the protocol enums (used by the codec and by log messages).
 const char * to_string(BlockingType value);
 const char * to_string(ActionStatus value);

@@ -499,6 +499,283 @@ std::string encode_state(const State & state)
   return out.dump();
 }
 
+// ------------------------------------------------- master control side ----
+
+namespace
+{
+
+Json encode_action(const Action & action)
+{
+  Json out;
+  out["actionType"] = action.action_type;
+  out["actionId"] = action.action_id;
+  if (action.action_description) {out["actionDescription"] = *action.action_description;}
+  out["blockingType"] = to_string(action.blocking_type);
+  Json parameters{Json::Array{}};
+  for (const ActionParameter & parameter : action.action_parameters) {
+    Json item;
+    item["key"] = parameter.key;
+    item["value"] = parameter.value;
+    parameters.push_back(std::move(item));
+  }
+  out["actionParameters"] = std::move(parameters);
+  return out;
+}
+
+Json encode_actions(const std::vector<Action> & actions)
+{
+  Json out{Json::Array{}};
+  for (const Action & action : actions) {
+    out.push_back(encode_action(action));
+  }
+  return out;
+}
+
+bool optional_bool(const Json & object, const char * key, bool fallback, const std::string & path)
+{
+  const Json * value = object.find(key);
+  return value == nullptr ? fallback : as_bool(*value, path + "." + key);
+}
+
+ActionStatus decode_action_status(const std::string & text, const std::string & path)
+{
+  if (text == "WAITING") {return ActionStatus::Waiting;}
+  if (text == "INITIALIZING") {return ActionStatus::Initializing;}
+  if (text == "RUNNING") {return ActionStatus::Running;}
+  if (text == "PAUSED") {return ActionStatus::Paused;}
+  if (text == "FINISHED") {return ActionStatus::Finished;}
+  if (text == "FAILED") {return ActionStatus::Failed;}
+  fail(path, "expected one of WAITING, INITIALIZING, RUNNING, PAUSED, FINISHED, FAILED");
+}
+
+OperatingMode decode_operating_mode(const std::string & text, const std::string & path)
+{
+  if (text == "AUTOMATIC") {return OperatingMode::Automatic;}
+  if (text == "SEMIAUTOMATIC") {return OperatingMode::Semiautomatic;}
+  if (text == "MANUAL") {return OperatingMode::Manual;}
+  if (text == "SERVICE") {return OperatingMode::Service;}
+  if (text == "TEACHIN") {return OperatingMode::Teachin;}
+  fail(path, "expected one of AUTOMATIC, SEMIAUTOMATIC, MANUAL, SERVICE, TEACHIN");
+}
+
+EStop decode_e_stop(const std::string & text, const std::string & path)
+{
+  if (text == "AUTOACK") {return EStop::Autoack;}
+  if (text == "MANUAL") {return EStop::Manual;}
+  if (text == "REMOTE") {return EStop::Remote;}
+  if (text == "NONE") {return EStop::None;}
+  fail(path, "expected one of AUTOACK, MANUAL, REMOTE, NONE");
+}
+
+AgvPosition decode_agv_position(const Json & value, const std::string & path)
+{
+  require_object(value, path);
+  AgvPosition position;
+  position.x = required_number(value, "x", path);
+  position.y = required_number(value, "y", path);
+  position.theta = required_number(value, "theta", path);
+  position.map_id = required_string(value, "mapId", path);
+  position.position_initialized = required_bool(value, "positionInitialized", path);
+  position.localization_score = optional_number(value, "localizationScore", path);
+  return position;
+}
+
+}  // namespace
+
+std::string encode_order(const Order & order)
+{
+  Json out;
+  encode_header(order.header, out);
+  out["orderId"] = order.order_id;
+  out["orderUpdateId"] = order.order_update_id;
+  if (order.zone_set_id) {out["zoneSetId"] = *order.zone_set_id;}
+
+  Json nodes{Json::Array{}};
+  for (const Node & node : order.nodes) {
+    Json item;
+    item["nodeId"] = node.node_id;
+    item["sequenceId"] = node.sequence_id;
+    if (node.node_description) {item["nodeDescription"] = *node.node_description;}
+    item["released"] = node.released;
+    if (node.node_position) {item["nodePosition"] = encode_node_position(*node.node_position);}
+    item["actions"] = encode_actions(node.actions);
+    nodes.push_back(std::move(item));
+  }
+  out["nodes"] = std::move(nodes);
+
+  Json edges{Json::Array{}};
+  for (const Edge & edge : order.edges) {
+    Json item;
+    item["edgeId"] = edge.edge_id;
+    item["sequenceId"] = edge.sequence_id;
+    if (edge.edge_description) {item["edgeDescription"] = *edge.edge_description;}
+    item["released"] = edge.released;
+    item["startNodeId"] = edge.start_node_id;
+    item["endNodeId"] = edge.end_node_id;
+    if (edge.max_speed) {item["maxSpeed"] = *edge.max_speed;}
+    if (edge.orientation) {item["orientation"] = *edge.orientation;}
+    item["actions"] = encode_actions(edge.actions);
+    edges.push_back(std::move(item));
+  }
+  out["edges"] = std::move(edges);
+  return out.dump();
+}
+
+std::string encode_instant_actions(const InstantActions & instant_actions)
+{
+  Json out;
+  encode_header(instant_actions.header, out);
+  out["actions"] = encode_actions(instant_actions.actions);
+  return out.dump();
+}
+
+State decode_state(std::string_view payload)
+{
+  const std::string path = "state";
+  const Json root = parse_payload(payload, path);
+  require_object(root, path);
+
+  State state;
+  state.header = decode_header(root, path);
+  state.order_id = required_string(root, "orderId", path);
+  state.order_update_id = required_uint32(root, "orderUpdateId", path);
+  state.zone_set_id = optional_string(root, "zoneSetId", path);
+  state.last_node_id = required_string(root, "lastNodeId", path);
+  state.last_node_sequence_id = required_uint32(root, "lastNodeSequenceId", path);
+  state.driving = required_bool(root, "driving", path);
+  state.paused = optional_bool(root, "paused", false, path);
+  state.new_base_request = optional_bool(root, "newBaseRequest", false, path);
+  state.operating_mode = decode_operating_mode(
+    required_string(root, "operatingMode", path), path + ".operatingMode");
+
+  std::size_t index = 0;
+  for (const Json & item : required_array(root, "nodeStates", path)) {
+    const std::string item_path = indexed(path, "nodeStates", index++);
+    require_object(item, item_path);
+    NodeState node;
+    node.node_id = required_string(item, "nodeId", item_path);
+    node.sequence_id = required_uint32(item, "sequenceId", item_path);
+    node.released = required_bool(item, "released", item_path);
+    if (const Json * position = item.find("nodePosition")) {
+      node.node_position = decode_node_position(*position, item_path + ".nodePosition");
+    }
+    state.node_states.push_back(std::move(node));
+  }
+
+  index = 0;
+  for (const Json & item : required_array(root, "edgeStates", path)) {
+    const std::string item_path = indexed(path, "edgeStates", index++);
+    require_object(item, item_path);
+    EdgeState edge;
+    edge.edge_id = required_string(item, "edgeId", item_path);
+    edge.sequence_id = required_uint32(item, "sequenceId", item_path);
+    edge.released = required_bool(item, "released", item_path);
+    state.edge_states.push_back(std::move(edge));
+  }
+
+  if (const Json * position = root.find("agvPosition")) {
+    state.agv_position = decode_agv_position(*position, path + ".agvPosition");
+  }
+  if (const Json * velocity = root.find("velocity")) {
+    const std::string velocity_path = path + ".velocity";
+    require_object(*velocity, velocity_path);
+    Velocity decoded;
+    decoded.vx = optional_number(*velocity, "vx", velocity_path).value_or(0.0);
+    decoded.vy = optional_number(*velocity, "vy", velocity_path).value_or(0.0);
+    decoded.omega = optional_number(*velocity, "omega", velocity_path).value_or(0.0);
+    state.velocity = decoded;
+  }
+
+  index = 0;
+  for (const Json & item : required_array(root, "actionStates", path)) {
+    const std::string item_path = indexed(path, "actionStates", index++);
+    require_object(item, item_path);
+    ActionState action;
+    action.action_id = required_string(item, "actionId", item_path);
+    action.action_type = optional_string(item, "actionType", item_path).value_or("");
+    action.action_description = optional_string(item, "actionDescription", item_path);
+    action.action_status = decode_action_status(
+      required_string(item, "actionStatus", item_path), item_path + ".actionStatus");
+    action.result_description = optional_string(item, "resultDescription", item_path);
+    state.action_states.push_back(std::move(action));
+  }
+
+  if (const Json * battery = root.find("batteryState")) {
+    const std::string battery_path = path + ".batteryState";
+    require_object(*battery, battery_path);
+    state.battery_state.battery_charge =
+      optional_number(*battery, "batteryCharge", battery_path).value_or(0.0);
+    state.battery_state.charging = optional_bool(*battery, "charging", false, battery_path);
+    state.battery_state.battery_voltage =
+      optional_number(*battery, "batteryVoltage", battery_path);
+  }
+
+  index = 0;
+  for (const Json & item : required_array(root, "errors", path)) {
+    const std::string item_path = indexed(path, "errors", index++);
+    require_object(item, item_path);
+    Error error;
+    error.error_type = required_string(item, "errorType", item_path);
+    error.error_description = optional_string(item, "errorDescription", item_path).value_or("");
+    const std::string level = required_string(item, "errorLevel", item_path);
+    if (level == "FATAL") {
+      error.error_level = ErrorLevel::Fatal;
+    } else if (level == "WARNING") {
+      error.error_level = ErrorLevel::Warning;
+    } else {
+      fail(item_path + ".errorLevel", "expected one of WARNING, FATAL");
+    }
+    if (const Json * references = item.find("errorReferences")) {
+      if (!references->is_array()) {
+        fail(item_path + ".errorReferences", "expected array");
+      }
+      std::size_t reference_index = 0;
+      for (const Json & reference : references->as_array()) {
+        const std::string reference_path =
+          indexed(item_path, "errorReferences", reference_index++);
+        require_object(reference, reference_path);
+        error.error_references.push_back(
+          ErrorReference{
+            required_string(reference, "referenceKey", reference_path),
+            required_string(reference, "referenceValue", reference_path)});
+      }
+    }
+    state.errors.push_back(std::move(error));
+  }
+
+  if (const Json * safety = root.find("safetyState")) {
+    const std::string safety_path = path + ".safetyState";
+    require_object(*safety, safety_path);
+    if (const auto e_stop = optional_string(*safety, "eStop", safety_path)) {
+      state.safety_state.e_stop = decode_e_stop(*e_stop, safety_path + ".eStop");
+    }
+    state.safety_state.field_violation =
+      optional_bool(*safety, "fieldViolation", false, safety_path);
+  }
+  return state;
+}
+
+Connection decode_connection(std::string_view payload)
+{
+  const std::string path = "connection";
+  const Json root = parse_payload(payload, path);
+  require_object(root, path);
+
+  Connection connection;
+  connection.header = decode_header(root, path);
+  const std::string text = required_string(root, "connectionState", path);
+  if (text == "ONLINE") {
+    connection.connection_state = ConnectionState::Online;
+  } else if (text == "OFFLINE") {
+    connection.connection_state = ConnectionState::Offline;
+  } else if (text == "CONNECTIONBROKEN") {
+    connection.connection_state = ConnectionState::ConnectionBroken;
+  } else {
+    fail(path + ".connectionState", "expected one of ONLINE, OFFLINE, CONNECTIONBROKEN");
+  }
+  return connection;
+}
+
 std::string encode_connection(const Connection & connection)
 {
   Json out;

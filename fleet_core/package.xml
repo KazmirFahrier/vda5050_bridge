@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>fleet_core</name>
+  <version>0.1.0</version>
+  <description>
+    Fleet traffic control without ROS or MQTT: roadmap, conflict detection, multi-robot
+    planning, deadlock-free execution and the master control side of VDA 5050.
+  </description>
+  <maintainer email="maintainer@example.com">vda5050_bridge maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>vda5050_core</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_cmake_cpplint</test_depend>
+  <test_depend>ament_cmake_uncrustify</test_depend>
+  <test_depend>ament_cmake_xmllint</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
