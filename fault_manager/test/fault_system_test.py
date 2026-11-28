@@ -398,7 +398,7 @@ def main():
     info = subprocess.run(['ros2', 'bag', 'info', bag], capture_output=True, text=True)
     if info.returncode != 0 or '/test/heartbeat' not in info.stdout:
         fail('ros2 bag info cannot read the bag:\n' + info.stdout + info.stderr)
-    ok('ros2 bag info reads the bag')
+    ok('ros2 bag info reads the bag; files: ' + ', '.join(sorted(os.listdir(bag))))
 
     print('== the fault clears ==', flush=True)
     monitors.report('TEST-INSTANT', False)
