@@ -188,6 +188,20 @@ class _Handler(BaseHTTPRequestHandler):
         header = self.headers.get('Authorization', '')
         return hmac.compare_digest(header.encode('utf-8'), f'Bearer {token}'.encode('utf-8'))
 
+    def _same_origin(self):
+        """
+        Refuse a state-changing request that another web site made the browser send.
+
+        A page on any site can make a visitor's browser POST to this server.
+        Browsers name the calling site in the Origin header; a request from
+        this server's own page names this server. Programs such as curl send
+        no Origin and are not affected.
+        """
+        origin = self.headers.get('Origin')
+        if origin is None:
+            return True
+        return urlsplit(origin).netloc == self.headers.get('Host', '')
+
     def _route(self, method):
         try:
             parts = urlsplit(self.path)
@@ -298,6 +312,9 @@ class _Handler(BaseHTTPRequestHandler):
         return True
 
     def _acknowledge(self, code):
+        if not self._same_origin():
+            self._error(HTTPStatus.FORBIDDEN, 'cross-site request refused')
+            return True
         if not self._authorized():
             self.send_response(HTTPStatus.UNAUTHORIZED)
             self.send_header('WWW-Authenticate', 'Bearer')

@@ -269,6 +269,19 @@ def test_token_protects_acknowledge_but_not_reading():
         running.stop()
 
 
+def test_acknowledge_from_another_web_site_is_refused(running):
+    path = '/api/v1/faults/BUMPER%201%2Fa/acknowledge'
+    status, _, body = running.request('POST', path, {'Origin': 'http://evil.example'})
+    assert status == 403
+    assert 'error' in json.loads(body)
+    assert running.backend.acknowledged == []
+
+    # The gateway's own page names this server as its origin and is accepted.
+    own = f'http://127.0.0.1:{running.port}'
+    assert running.request('POST', path, {'Origin': own})[0] == 200
+    assert running.backend.acknowledged == ['BUMPER 1/a']
+
+
 # ---- server-sent events -----------------------------------------------------------
 
 

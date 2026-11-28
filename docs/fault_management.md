@@ -377,6 +377,8 @@ curl -N 'http://localhost:8080/api/v1/events?after=512'     # live, replaying fr
 - **Security.** The server listens on `127.0.0.1` by default. Reading needs no
   credentials. Acknowledging needs a bearer token when `api_token` is set, and
   the node warns at start-up if it is reachable from the network without one.
+  An acknowledge request that a page of another web site makes the browser
+  send is refused (403).
   There is no TLS and there are no user accounts; on an untrusted network, put
   a reverse proxy with TLS in front.
 - **No web framework.** The server is Python's standard `http.server`, so the
@@ -402,7 +404,7 @@ ros2 service call /faults/acknowledge fault_msgs/srv/AcknowledgeFault '{code: BU
 |---|---|---|
 | `fault_core` unit tests | 54 tests in five suites: each transition of the state machine, debounce at the exact millisecond, flicker, latching, watchdog, unknown codes, queries, limits, restart, file damage, rotation, mapping to VDA 5050 | GCC and Clang with sanitizers; colcon |
 | `vda5050_core` unit tests | External errors and the fault hold in the order state machine (6 of its 115 tests) | Same |
-| `fault_gateway` unit tests | 36 tests: 7 of the JSON conversion, 29 of the HTTP layer over real sockets (routes, validation, token, event stream, replay, slow and vanished clients) | colcon (`pytest`) |
+| `fault_gateway` unit tests | 37 tests: 7 of the JSON conversion, 30 of the HTTP layer over real sockets (routes, validation, token, cross-site requests, event stream, replay, slow and vanished clients) | colcon (`pytest`) |
 | System test | All nodes together with a real broker; see below | colcon job in CI |
 
 The system test (`fault_manager/test/fault_system_test.py`) starts the fault
@@ -414,7 +416,7 @@ script plays the monitors, the operator and the fleet manager, and checks:
    VDA 5050 state on the broker, with the right level and text.
 3. A bag is written with the messages from before and after the fault, and
    `ros2 bag info` can read it. A low-severity fault writes none and is not
-   sent to the fleet manager.
+   sent to the fleet manager. Two faults at the same moment share one bag.
 4. A 0.3 s glitch does not become a fault; a persistent condition does, not
    before its debounce time, and shows `HEALING` before it clears.
 5. A critical latched fault during an order: the state reports `FATAL`, the

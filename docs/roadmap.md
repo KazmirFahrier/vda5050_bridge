@@ -6,7 +6,7 @@
 |---|---|
 | `vda5050_core` | Implemented; 115 unit tests, 98.8 % line coverage, schema-conformant |
 | `fault_core` | Implemented; 54 unit tests |
-| `fault_msgs`, `fault_manager`, `fault_gateway` | Implemented; 36 unit tests for the gateway; one end-to-end test of all fault nodes passes in CI |
+| `fault_msgs`, `fault_manager`, `fault_gateway` | Implemented; 37 unit tests for the gateway; one end-to-end test of all fault nodes passes in CI |
 | `vda5050_nav2_adapter` | Implemented; builds on ROS 2 Jazzy; integration test and Nav2 system test (loopback and Gazebo) pass in CI |
 | CI | Eight jobs: two standalone builds, colcon build with tests and linters plus the integration test and the fault system test, schema conformance, coverage, fuzzing, Nav2 in two simulators |
 

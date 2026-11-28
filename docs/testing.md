@@ -6,7 +6,7 @@
 |---|---|---|
 | `vda5050_core` unit tests | 115 tests, 98.8 % line coverage | GitHub Actions: GCC and Clang with sanitizers (real GoogleTest), and colcon on ROS 2 Jazzy |
 | `fault_core` unit tests | 54 tests, 98 % line coverage | Same as above |
-| `fault_gateway` unit tests | 36 tests of the HTTP layer and the JSON conversion | `colcon test` (pytest) |
+| `fault_gateway` unit tests | 37 tests of the HTTP layer and the JSON conversion | `colcon test` (pytest) |
 | Fault management system test | Passes | ROS 2 Jazzy container: fault manager, adapter, gateway, real Mosquitto broker, rosbag2, fake Nav2 |
 | Conformance to the official JSON schemas | All published messages and all example inputs conform to versions 2.0.0 and 2.1.0, with one documented deviation | GitHub Actions; schemas cloned from the official repository at fixed tags |
 | ROS 2 linters | cpplint, uncrustify, xmllint, lint_cmake, flake8, pep257 pass for all six packages (the Python package runs flake8 and pep257) | `colcon test` |
@@ -351,7 +351,7 @@ problems, none of which the earlier stand-in-header syntax check could have:
 |---|---|
 | Standalone CMake, GCC, Debug, ASan + UBSan, `-Werror`, real GoogleTest | 115/115 pass, example passes; `fault_core` 54/54 pass |
 | Standalone CMake, Clang, same flags | 115/115 pass, example passes; `fault_core` 54/54 pass |
-| colcon on `ros:jazzy`, all six packages | builds with no warnings; 115/115, 54/54 and the gateway's 36 pass; all linters pass |
+| colcon on `ros:jazzy`, all six packages | builds with no warnings; 115/115, 54/54 and the gateway's 37 pass; all linters pass |
 | Schema conformance, 2.0.0 and 2.1.0 | passes |
 | Coverage of `vda5050_core` | 98.8 % lines |
 | Integration test on `ros:jazzy` | passes |

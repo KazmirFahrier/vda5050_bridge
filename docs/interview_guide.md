@@ -281,7 +281,7 @@ history before continuing live.
 **Why no web framework?**
 The API is seven routes. Python's standard `http.server` handles that with no
 dependency to install on the robot. The HTTP layer is separate from ROS, which
-is why it has 29 tests that need no ROS. With more routes, authentication or
+is why it has 30 tests that need no ROS. With more routes, authentication or
 many clients I would move to a framework.
 
 **How do ROS and the HTTP threads work together?**

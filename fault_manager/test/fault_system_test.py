@@ -50,6 +50,8 @@ CATALOG = {'faults': [
     {'code': 'TEST-WATCHDOG', 'severity': 'ERROR', 'timeoutMs': 2000},
     {'code': 'TEST-DIAG', 'severity': 'ERROR'},
     {'code': 'TEST-QUIET', 'severity': 'INFO'},
+    {'code': 'TEST-PAIR-A', 'severity': 'ERROR'},
+    {'code': 'TEST-PAIR-B', 'severity': 'ERROR'},
     {'code': 'BRIDGE-MQTT-001', 'severity': 'ERROR', 'activateAfterMs': 2000,
      'clearAfterMs': 500, 'timeoutMs': 4000},
     {'code': 'BRIDGE-NAV-001', 'severity': 'CRITICAL', 'activateAfterMs': 3000,
@@ -521,6 +523,24 @@ def main():
     monitors.report('TYPO-123', False)
     wait_until('and clears', lambda: 'TYPO-123' not in api_faults())
 
+    print('== two faults at the same moment share one capture ==', flush=True)
+    time.sleep(2.0)  # let any capture in progress finish
+    monitors.report('TEST-PAIR-A', True)
+    monitors.report('TEST-PAIR-B', True)
+    name = wait_until('a bag was written for the first of the two',
+                      lambda: [bag for bag in bags() if 'TEST-PAIR-A' in bag], 15)[0]
+    with open(os.path.join(CAPTURES, name, 'fault.json')) as summary_file:
+        summary = json.load(summary_file)
+    if summary['alsoActivated'] != ['TEST-PAIR-B']:
+        fail(f'the second fault is not named in the summary: {summary}')
+    time.sleep(2.0)
+    if any('TEST-PAIR-B' in bag for bag in bags()):
+        fail('the second fault got a bag of its own')
+    ok('one bag; its summary names the second fault')
+    monitors.report('TEST-PAIR-A', False)
+    monitors.report('TEST-PAIR-B', False)
+    wait_until('both clear', lambda: api_faults() == {})
+
     print('== history ==', flush=True)
     events = api_history()
     sequences = [event['sequence'] for event in events]
@@ -545,7 +565,7 @@ def main():
         fail('a malformed query was not refused')
 
     print('== old captures are deleted ==', flush=True)
-    # At least four faults of severity ERROR or higher have activated by now;
+    # At least five faults of severity ERROR or higher have activated by now;
     # the recorder is configured to keep three bags.
     names = wait_until(
         'only the 3 newest bags are kept',
