@@ -14,21 +14,30 @@ them node by node with Nav2, runs the attached actions, and reports state back.
 
 | Package | What it is | Verification |
 |---|---|---|
-| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 96 unit tests and one end-to-end example. Pass in CI with GCC and Clang under AddressSanitizer/UBSan, and under colcon on ROS 2 Jazzy |
-| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Three tests in CI: an integration test (real Mosquitto broker, fake Nav2), and a system test that drives orders through the **real Nav2 stack** twice: with Nav2's loopback simulator, and in **Gazebo** with a simulated lidar and AMCL localisation |
+| `vda5050_core` | ROS-independent C++17 library: JSON, message types, codec, order validation, order state machine, MQTT session logic | 109 unit tests and one end-to-end example, 98.8 % line coverage. Runs in CI with GCC and Clang under AddressSanitizer/UBSan and under colcon on ROS 2 Jazzy. Its messages are validated against the official VDA 5050 JSON schemas, versions 2.0.0 and 2.1.0, and its parsers are fuzzed for 60 s per build |
+| `vda5050_nav2_adapter` | ROS 2 lifecycle node: Nav2 action client, libmosquitto transport, action forwarding, parameters, launch file | Builds on ROS 2 Jazzy with no warnings. Tested in CI against a real Mosquitto broker (including a broker outage, a crash, and lifecycle transitions driven from outside) and against the **real Nav2 stack**, both with Nav2's loopback simulator and in **Gazebo** with a simulated lidar and AMCL |
 
-What has **not** been done:
+Both packages pass the ROS 2 linters (cpplint, uncrustify, xmllint, lint_cmake,
+flake8, pep257) as part of `colcon test`.
 
-- No physical robot.
-- No run against a real fleet manager. Master control is played by a script.
-- No obstacle that appears while the robot is driving. The Gazebo world's
-  walls and pillars are sensed by the lidar and planned around, but nothing
-  moves into the path. Navigation failure is tested only for a goal Nav2
-  refuses at once (a node off the map).
-- Broker outages are implemented but not exercised against a real broker.
-- No automated validation against the official JSON schemas; field names were
-  checked by reading the published v2.0 schemas.
-- The launch file has not been executed (tests start the executable directly).
+What has **not** been done, and cannot be from a CI machine:
+
+- No physical robot. Everything that moves is simulated.
+- No real fleet manager. Master control is played by a script; the evidence of
+  interoperability is schema conformance, not a session with a commercial product.
+
+Known gaps and deviations:
+
+- Line coverage is measured for the core only. The adapter is exercised by
+  three end-to-end tests but has no unit tests and no coverage figure.
+- Action status `PAUSED` is in the specification text but not in the official
+  schemas' enum. The library follows the text; a master that validates strictly
+  against the schema would reject a state containing a paused action.
+- With Nav2's default parameters the robot stops 0.17 to 0.24 m from a node,
+  and in a narrow passage Nav2 can stall or give up. See
+  [docs/testing.md](docs/testing.md); tuning Nav2 is deployment work.
+- Protocol features not implemented are listed in
+  [docs/roadmap.md](docs/roadmap.md).
 
 Details: [docs/testing.md](docs/testing.md).
 
@@ -38,7 +47,7 @@ Details: [docs/testing.md](docs/testing.md).
 vda5050_bridge/
 ├── README.md
 ├── LICENSE                         Apache-2.0
-├── .github/workflows/ci.yml        CI: standalone x2 compilers, colcon, integration test, Nav2 system test (loopback and Gazebo)
+├── .github/workflows/ci.yml        CI: 8 jobs (builds, tests, linters, schemas, coverage, fuzzing, Nav2, Gazebo)
 ├── docs/
 │   ├── vda5050_primer.md           The protocol, explained from scratch
 │   ├── architecture.md             How the code is structured and why
@@ -57,7 +66,9 @@ vda5050_bridge/
 │   │   ├── order_manager.hpp       The order state machine
 │   │   └── session.hpp             What is published on which topic, and when
 │   ├── src/
-│   ├── test/
+│   ├── test/                       Unit tests, schema-conformance scripts, example messages
+│   ├── tools/emit_samples.cpp      Writes example messages for schema validation
+│   ├── fuzz/fuzz_decoder.cpp       libFuzzer target for the parsers
 │   └── examples/simulated_vehicle.cpp   Runnable demo: no ROS, no broker
 └── vda5050_nav2_adapter/           ament_cmake package
     ├── README.md                   Interfaces, parameters, how to run

@@ -1,0 +1,53 @@
+{
+  "headerId": 7,
+  "timestamp": "2026-11-26T19:50:00.000Z",
+  "version": "2.0.0",
+  "manufacturer": "acme",
+  "serialNumber": "amr-001",
+  "orderId": "order-1",
+  "orderUpdateId": 0,
+  "zoneSetId": "zones-a",
+  "nodes": [
+    {
+      "nodeId": "N0", "sequenceId": 0, "released": true,
+      "nodePosition": {"x": 1.5, "y": -2.0, "theta": 0.5, "mapId": "floor1",
+                       "allowedDeviationXY": 0.3, "allowedDeviationTheta": 0.2},
+      "actions": []
+    },
+    {
+      "nodeId": "N1", "sequenceId": 2, "released": true, "nodeDescription": "dock",
+      "nodePosition": {"x": 4.0, "y": -2.0, "mapId": "floor1"},
+      "actions": [
+        {
+          "actionType": "pick", "actionId": "a1", "blockingType": "HARD",
+          "actionDescription": "pick pallet",
+          "actionParameters": [
+            {"key": "stationType", "value": "floor"},
+            {"key": "height", "value": 0.2},
+            {"key": "tags", "value": ["a", "b"]},
+            {"key": "gentle", "value": true}
+          ]
+        }
+      ]
+    },
+    {
+      "nodeId": "N2", "sequenceId": 4, "released": false,
+      "nodePosition": {"x": 8.0, "y": -2.0, "mapId": "floor1"},
+      "actions": []
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "E0", "sequenceId": 1, "released": true,
+      "startNodeId": "N0", "endNodeId": "N1", "maxSpeed": 1.2, "edgeDescription": "aisle 3",
+      "actions": [
+        {"actionType": "beep", "actionId": "a2", "blockingType": "NONE"}
+      ]
+    },
+    {
+      "edgeId": "E1", "sequenceId": 3, "released": false,
+      "startNodeId": "N1", "endNodeId": "N2",
+      "actions": []
+    }
+  ]
+}

@@ -143,10 +143,13 @@ continuing is pointless. A per-action-type policy is on the roadmap.
 
 ## ADR-009: Tolerant reader, strict writer
 
-**Decision.** Unknown JSON fields are ignored; one known spelling variant
-(`allowedDeviationXY` / `allowedDeviationXy`) is accepted. Output always uses
-the specification spelling, emits required arrays even when empty, and omits
-unset optional fields instead of writing `null`.
+**Decision.** Unknown JSON fields are ignored, and three known variants are
+accepted on input: `allowedDeviationXY` / `allowedDeviationXy`, an instant
+action's `actionType` / `actionName` (the 2.0.0 schema uses the latter), and
+the instant-actions array under `actions` / `instantActions` (the v1.1 name).
+Output always uses the specification spelling, emits required arrays and
+objects even when empty, and omits unset optional fields instead of writing
+`null`. Output is validated in CI against the official 2.0.0 and 2.1.0 schemas.
 
 **Why.** Interoperability with fleet managers written by other people is the
 whole purpose. Minor-version additions must not break decoding, and our output
@@ -270,4 +273,37 @@ mismatch is reported as a `validationError` and the message is not acted on.
 master can deliver a message to the wrong topic. Acting on it would move the
 wrong vehicle. A different minor version is accepted because minor versions are
 backwards compatible.
+
+---
+
+## ADR-019: Follow the specification text where it disagrees with the schema
+
+**Decision.** An action that reports `PAUSED` is published as `PAUSED`.
+
+**Context.** The specification text lists `PAUSED` among the action statuses.
+The official JSON schemas for 2.0.0 and 2.1.0 leave it out of the
+`actionStatus` enum. Schema validation in CI found this.
+
+**Why.** The text is the normative description of behaviour, and a master that
+tracks actions needs to tell a paused action from a running one. Mapping it to
+`RUNNING` would make the state untrue.
+
+**Cost.** A master that validates states strictly against the schema would
+reject one that contains a paused action. The adapter only emits `PAUSED` when
+the robot's own action executor reports it.
+
+**Guard.** `run_schema_conformance.sh` asserts that this is the only message
+rejected by the schemas, and that it is rejected for this reason alone. If the
+schemas are corrected the script says so.
+
+---
+
+## ADR-020: Publish the factsheet retained
+
+**Decision.** The factsheet is published with the MQTT retain flag, QoS 0.
+
+**Why.** The specification's factsheet section says all messages on that topic
+shall be sent retained, so a master that connects later still receives it. An
+earlier version of this code published it non-retained, on an assumption; it
+was corrected when the claim was checked against the specification text.
 

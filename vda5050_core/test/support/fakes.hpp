@@ -5,8 +5,8 @@
 // what OrderManager asked for; each test then plays the robot by calling
 // on_navigation_succeeded(), on_action_status() and so on.
 
-#ifndef FAKES_HPP_
-#define FAKES_HPP_
+#ifndef SUPPORT__FAKES_HPP_
+#define SUPPORT__FAKES_HPP_
 
 #include <set>
 #include <string>
@@ -108,4 +108,4 @@ inline vda5050_core::AgvPosition position_at(double x, double y)
 
 }  // namespace test_support
 
-#endif  // FAKES_HPP_
+#endif  // SUPPORT__FAKES_HPP_

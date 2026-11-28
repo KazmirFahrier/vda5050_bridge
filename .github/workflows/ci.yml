@@ -127,3 +127,60 @@ jobs:
           source install/setup.bash
           bash src/vda5050_bridge/vda5050_nav2_adapter/test/nav2_simulation_test.sh
 
+  schema-conformance:
+    name: Official VDA 5050 JSON schemas (2.0.0 and 2.1.0)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3-jsonschema
+      - name: Fetch the official schemas at fixed versions
+        run: |
+          git clone --depth 1 --branch 2.0.0 https://github.com/VDA5050/VDA5050 schemas-2.0.0
+          git clone --depth 1 --branch 2.1.0 https://github.com/VDA5050/VDA5050 schemas-2.1.0
+      - name: Build
+        run: |
+          cmake -S vda5050_core -B build -G Ninja -DBUILD_TESTING=OFF
+          cmake --build build --target emit_samples
+      - name: Validate
+        run: >
+          bash vda5050_core/test/run_schema_conformance.sh build/emit_samples
+          schemas-2.0.0/json_schemas schemas-2.1.0/json_schemas
+
+  coverage:
+    name: Test coverage of vda5050_core
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y libgtest-dev ninja-build gcovr
+      - name: Build with coverage instrumentation
+        run: |
+          cmake -S vda5050_core -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage -O0"
+          cmake --build build
+      - name: Run the unit tests
+        run: ./build/vda5050_core_tests
+      - name: Report (fails below 95 % line coverage)
+        run: >
+          gcovr --root . --filter 'vda5050_core/src/'
+          --print-summary --fail-under-line 95
+          build/CMakeFiles/vda5050_core.dir
+
+  fuzz:
+    name: Fuzz the JSON parser and decoders (60 s)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Clang with libFuzzer
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-rt-dev
+      - name: Build the fuzz target
+        run: >
+          clang++ -std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined
+          -fno-sanitize-recover=undefined
+          -Ivda5050_core/include vda5050_core/fuzz/fuzz_decoder.cpp vda5050_core/src/*.cpp
+          -o fuzz_decoder
+      - name: Fuzz
+        run: |
+          mkdir corpus && cp vda5050_core/test/data/*.json corpus/
+          ./fuzz_decoder -max_total_time=60 -max_len=8192 -print_final_stats=1 corpus
+

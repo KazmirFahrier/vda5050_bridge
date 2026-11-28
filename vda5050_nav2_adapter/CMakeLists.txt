@@ -64,4 +64,10 @@ install(TARGETS ${PROJECT_NAME}_lib
 install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
 install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  # Style and static checks, as listed in package.xml.
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
 ament_package()

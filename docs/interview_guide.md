@@ -15,13 +15,15 @@ as the rest; interviewers probe exactly there.
 > no ROS dependency: it decodes orders, validates them, runs a state machine
 > that walks the route node by node, schedules actions by their blocking type,
 > handles cancel and pause, and decides what goes out over MQTT and when. It has
-> 96 unit tests that run in milliseconds. A ROS 2 lifecycle node attaches it to
+> 109 unit tests that run in milliseconds, with 98.8 % line coverage, and its
+> messages validate against the official VDA 5050 JSON schemas. A ROS 2 lifecycle node attaches it to
 > Nav2 and an MQTT broker.
 
 The whole thing builds in CI on ROS 2 Jazzy. One test runs the node against a
 real MQTT broker; another drives orders through the real Nav2 stack, including
 in Gazebo with a simulated lidar and AMCL: multi-leg orders, pause, resume,
-cancel, and a navigation failure with recovery.
+cancel, a navigation failure with recovery, an unmapped obstacle, and a broker
+outage. The parsers are fuzzed and the code passes the ROS 2 linters.
 
 ## 2-minute version: add these three points
 
@@ -139,6 +141,25 @@ aim the heading along the direction of travel from the robot's actual position.
 The leg now takes 4 seconds, and the test fails if it is slow or if Nav2 logs
 any progress failure, so it cannot come back unnoticed.
 
+**How do you know it really speaks VDA 5050?**
+CI clones the official repository at tags 2.0.0 and 2.1.0 and validates every
+message the library publishes against the JSON schemas, and checks that
+schema-valid orders and instant actions are accepted by my decoder. The first
+run found three mismatches I had not caught by reading: the factsheet lacked
+two required objects, the 2.0.0 schema calls an instant action's type
+`actionName` where the text says `actionType`, and the factsheet must be
+published retained. It also showed the schema and the specification text
+disagree about `PAUSED`; I follow the text and the test asserts that this is
+the only deviation.
+
+**What happens when the broker goes down?**
+libmosquitto reconnects with backoff. Nothing is queued while offline. On
+reconnect the session publishes `ONLINE` and a complete state, so progress made
+offline is reported in one message. The integration test kills the broker while
+a leg is being driven, lets the leg finish offline, restarts the broker and
+checks exactly that. A separate step kills the adapter with SIGKILL and checks
+the broker publishes the `CONNECTIONBROKEN` last will.
+
 **Have you had a test that passed for the wrong reason?**
 Yes. The Nav2 test waited for the navigator to be "active" by searching the
 lifecycle state for that word, which also matches "inactive". It passed for
@@ -201,8 +222,13 @@ State these before you are asked.
 
 - It has never run on a physical robot or against a real fleet manager. A
   script plays master control.
-- In simulation the obstacles are static. Nothing moves into the path, and
-  navigation failure is tested only for a goal Nav2 refuses outright.
+- Coverage is measured for the core only; the adapter has end-to-end tests but
+  no unit tests.
+- With default Nav2 parameters the robot stops up to 0.24 m from a node and
+  Nav2 can give up in a narrow passage. I report that correctly; I have not
+  tuned Nav2.
+- One deliberate deviation from the official JSON schema: action status
+  `PAUSED`, which the specification text defines and the schema omits.
 - Simplifications: blocking edge actions run at the start of the edge; edge
   actions are not stopped when the edge is left; `trajectory`, `loads` and
   `information` are not implemented; action pause/resume is not propagated to

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 # Copyright 2026 vda5050_bridge contributors
 # SPDX-License-Identifier: Apache-2.0
-"""A stand-in for Nav2: accepts every NavigateToPose goal and succeeds shortly after."""
+"""
+A stand-in for Nav2: accepts every NavigateToPose goal and succeeds after a delay.
 
+The delay is FAKE_NAV_DELAY seconds (default 0.5).
+"""
+
+import os
 import time
 
 from nav2_msgs.action import NavigateToPose
@@ -22,7 +27,7 @@ class FakeNav2(Node):
     def execute(self, goal_handle):
         pose = goal_handle.request.pose.pose.position
         self.get_logger().info(f'driving to ({pose.x:.1f}, {pose.y:.1f})')
-        time.sleep(0.5)
+        time.sleep(float(os.environ.get('FAKE_NAV_DELAY', '0.5')))
         if goal_handle.is_cancel_requested:
             goal_handle.canceled()
         else:

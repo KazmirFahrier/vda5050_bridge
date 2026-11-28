@@ -47,7 +47,9 @@ public:
 const char kOrderTopic[] = "uagv/v2/acme/amr-001/order";
 const char kInstantTopic[] = "uagv/v2/acme/amr-001/instantActions";
 
-std::string header_json(const std::string & serial = "amr-001", const std::string & version = "2.0.0")
+std::string header_json(
+  const std::string & serial = "amr-001",
+  const std::string & version = "2.0.0")
 {
   return R"("headerId":1,"timestamp":"2026-11-26T20:00:00.000Z","version":")" + version +
          R"(","manufacturer":"acme","serialNumber":")" + serial + R"(",)";
@@ -328,6 +330,8 @@ TEST_F(SessionTest, FactsheetIsPublishedOnRequest)
 
   const std::vector<MqttMessage> sheets = transport.on("factsheet");
   ASSERT_EQ(sheets.size(), 1u);  // once per request
+  EXPECT_TRUE(sheets[0].retain);  // the specification requires a retained factsheet
+  EXPECT_EQ(sheets[0].qos, 0);
   const Json json = Json::parse(sheets[0].payload);
   EXPECT_EQ(json.find("typeSpecification")->find("seriesName")->as_string(), "carrier-100");
   EXPECT_EQ(json.find("manufacturer")->as_string(), "acme");

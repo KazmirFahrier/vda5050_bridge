@@ -52,6 +52,11 @@ install(TARGETS ${PROJECT_NAME}
 add_executable(simulated_vehicle examples/simulated_vehicle.cpp)
 target_link_libraries(simulated_vehicle PRIVATE ${PROJECT_NAME})
 
+# Writes example messages for validation against the official JSON schemas
+# (see test/run_schema_conformance.sh).
+add_executable(emit_samples tools/emit_samples.cpp)
+target_link_libraries(emit_samples PRIVATE ${PROJECT_NAME})
+
 include(CTest)
 if(BUILD_TESTING)
   set(TEST_SOURCES
@@ -65,6 +70,14 @@ if(BUILD_TESTING)
 
   if(ament_cmake_FOUND)
     # ROS 2 workspace: GoogleTest as vendored by ament.
+    # Style and static checks (cpplint, uncrustify, xmllint, lint_cmake,
+    # flake8, pep257), as listed in package.xml. The GoogleTest stand-in is
+    # macro-heavy third-party-style code and is not linted.
+    find_package(ament_lint_auto REQUIRED)
+    set(AMENT_LINT_AUTO_FILE_EXCLUDE
+      ${CMAKE_CURRENT_SOURCE_DIR}/test/support/shim/gtest/gtest.h)
+    ament_lint_auto_find_test_dependencies()
+
     find_package(ament_cmake_gtest REQUIRED)
     ament_add_gtest(${PROJECT_NAME}_tests ${TEST_SOURCES})
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME})

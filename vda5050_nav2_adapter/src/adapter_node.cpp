@@ -226,6 +226,9 @@ void AdapterNode::go_offline()
     // CONNECTIONBROKEN last will.
     session_->shutdown();
     transport_->disconnect();
+    // Drop whatever the MQTT thread queued on the way out (typically the
+    // "disconnected" event), so a later activation starts with a clean slate.
+    transport_->take_events();
   }
 }
 
@@ -277,7 +280,8 @@ void AdapterNode::update_position()
     position_.x = transform.transform.translation.x;
     position_.y = transform.transform.translation.y;
     // Yaw from a quaternion (rotation about z).
-    position_.theta = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    position_.theta = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+        1.0 - 2.0 * (q.y * q.y + q.z * q.z));
     position_.position_initialized = true;
   } catch (const tf2::TransformException &) {
     // No localisation (yet, or lost). Keep the last pose but tell master

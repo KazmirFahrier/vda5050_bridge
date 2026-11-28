@@ -115,3 +115,20 @@ TEST(OrderValidator, ReportsEveryProblemNotJustTheFirst)
   order.edges[1].end_node_id = "elsewhere";
   EXPECT_GE(validate_order(order).size(), 2u);
 }
+
+TEST(OrderValidator, RejectsEmptyIdentifiers)
+{
+  Order order = make_order("o", 0, 3, 3);
+  order.nodes[1].node_id = "";
+  order.edges[0].end_node_id = "";  // keep the edge consistent with its node
+  order.edges[1].start_node_id = "";
+  EXPECT_TRUE(mentions(validate_order(order), "nodes[1]: nodeId must not be empty"));
+
+  order = make_order("o", 0, 3, 3);
+  order.edges[1].edge_id = "";
+  EXPECT_TRUE(mentions(validate_order(order), "edges[1]: edgeId must not be empty"));
+
+  order = make_order("o", 0, 2, 2);
+  order.nodes[0].actions.push_back(make_action("a1", "", BlockingType::Hard));
+  EXPECT_TRUE(mentions(validate_order(order), "actionType must not be empty"));
+}

@@ -91,8 +91,9 @@ publishes the `CONNECTIONBROKEN` last will.
 ## Integration test
 
 `test/integration_test.sh` starts a Mosquitto broker, a static `map ->
-base_link` transform, `test/fake_nav2_server.py` and the adapter, then plays
-master control with `mosquitto_pub` and checks what the vehicle publishes:
+base_link` transform, `test/fake_nav2_server.py` and the adapter (through
+`launch/adapter.launch.py`), then plays master control with `mosquitto_pub` and
+checks what the vehicle publishes:
 
 | Step | Checked |
 |---|---|
@@ -102,7 +103,10 @@ master control with `mosquitto_pub` and checks what the vehicle publishes:
 | Instant action `pick` | Accepted and started (`INITIALIZING`); a `FINISHED` report sent on `~/action_status` reaches master control. The content of `~/action_request` is not inspected |
 | Malformed order | Reported as `validationError` |
 | `factsheetRequest` | Factsheet published |
+| Broker killed during an order, then restarted | Vehicle reconnects by itself; `ONLINE`; state reports the leg that finished offline; no `CONNECTIONBROKEN` after the reconnect |
 | SIGINT | `OFFLINE` published; last will not triggered |
+| SIGKILL | Broker publishes the last will, `CONNECTIONBROKEN` |
+| Lifecycle driven from outside (`autostart:=false`, `ros2 lifecycle set`) | `configure` does not connect; `activate` gives `ONLINE`; `deactivate` gives `OFFLINE`; a repeat cycle works; `cleanup` then `configure` and `activate` work |
 
 ## System test with real Nav2
 
@@ -116,6 +120,7 @@ the real ones), then:
 | o2: C -> A, `startPause` then `stopPause` while driving | State shows `paused` and not driving; the leg does not finish during the pause; completes at A after resume with no errors |
 | ofail: A -> X, with X off the map | Nav2 fails the goal; state shows a `FATAL` `navigationError`, not driving, X still listed ahead; no retry. `cancelOrder` clears it; a fresh order from the robot's position completes and the error list is empty again |
 | o3: A -> C, `cancelOrder` while driving | Cancel reaches `FINISHED`; vehicle stopped, route cleared, no error raised, C not reached |
+| oblock (Gazebo only): A -> C with an unmapped 0.3 m box on the line | Either the order completes with the robot at C, or Nav2 gives up and the vehicle halts with a `FATAL` `navigationError` that `cancelOrder` then clears. In the first five CI runs Nav2 gave up twice and got round the box three times |
 | o4: back to A, then to D, a point between four pillars | Completes with no errors; reported position within tolerance of D; time and Nav2 controller stalls are printed |
 
 The same script runs in two modes:
@@ -146,6 +151,5 @@ libmosquitto, a dangling reference to a destroyed parameter temporary (caught by
 
 - TLS for the MQTT connection
 - `diagnostic_msgs` output
-- Unit tests for the individual adapter classes, and a test of an obstacle
-  that appears in the path after the vehicle has started driving.
+- Unit tests for the individual adapter classes
 - `NavigateThroughPoses` for smoother motion across several released nodes

@@ -239,6 +239,37 @@ TEST_F(OrderManagerTest, RejectsOrdersOutsideAutomaticModes)
   EXPECT_EQ(manager.snapshot().order_id, "o1");
 }
 
+TEST_F(OrderManagerTest, RejectsOrderWithUnsupportedEdgeAction)
+{
+  Order order = make_order("o1", 0, 3, 3);
+  order.edges[1].actions.push_back(make_action("a1", "teleport", BlockingType::None));
+  manager.handle_order(order);
+  EXPECT_TRUE(has_error(error_type::kOrder));
+  EXPECT_TRUE(navigation.goals.empty());
+}
+
+TEST_F(OrderManagerTest, UpdateRepeatingAKnownActionDoesNotDuplicateItsState)
+{
+  Order order = make_order("o1", 0, 3, 3);
+  order.nodes[2].actions.push_back(make_action("a1", "drop", BlockingType::Hard));
+  manager.handle_order(order);
+  manager.on_navigation_succeeded();  // at N1; base still reaches N2
+
+  // The update stitches at N2 and (as a master may) repeats N2's action on the
+  // node it re-sends... which is the stitching node, so it is not re-added.
+  Order update = make_order("o1", 1, 2, 2, 2);  // N2 -> N3
+  update.nodes[0].actions.push_back(make_action("a1", "drop", BlockingType::Hard));
+  update.nodes[1].actions.push_back(make_action("a1b", "pick", BlockingType::Hard));
+  manager.handle_order(update);
+
+  int count = 0;
+  for (const ActionState & state : manager.snapshot().action_states) {
+    count += state.action_id == "a1" ? 1 : 0;
+  }
+  EXPECT_EQ(count, 1);
+  EXPECT_TRUE(status_of("a1b") == ActionStatus::Waiting);
+}
+
 TEST_F(OrderManagerTest, NewOrderClearsOldErrorsAndActionStates)
 {
   manager.handle_instant_actions(instant("c0", "cancelOrder"));  // fails: nothing to cancel
@@ -566,6 +597,36 @@ TEST_F(OrderManagerTest, CancelWhileStandingFinishesImmediatelyAndStopsActions)
   EXPECT_EQ(actions.cancelled[0], "a1");
   EXPECT_EQ(navigation.cancel_calls, 0);
   EXPECT_FALSE(manager.has_active_order());
+}
+
+TEST_F(OrderManagerTest, CancelCompletesEvenIfTheLegFinishesFirst)
+{
+  // The robot reaches the node in the instant between the cancel request and
+  // Nav2 acting on it: the port reports success, not failure.
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  manager.handle_instant_actions(instant("c1", "cancelOrder"));
+  manager.on_navigation_succeeded();
+
+  const State state = manager.snapshot();
+  EXPECT_TRUE(status_of("c1") == ActionStatus::Finished);
+  EXPECT_TRUE(state.node_states.empty());
+  EXPECT_FALSE(state.driving);
+  EXPECT_EQ(navigation.goals.size(), 1u);  // did not carry on to N2
+  EXPECT_FALSE(manager.has_active_order());
+}
+
+TEST_F(OrderManagerTest, SecondCancelWhileOneIsInProgressFails)
+{
+  manager.handle_order(make_order("o1", 0, 3, 3));
+  manager.handle_instant_actions(instant("c1", "cancelOrder"));
+  manager.handle_instant_actions(instant("c2", "cancelOrder"));
+
+  EXPECT_TRUE(status_of("c1") == ActionStatus::Running);
+  EXPECT_TRUE(status_of("c2") == ActionStatus::Failed);
+  EXPECT_EQ(navigation.cancel_calls, 1);
+
+  manager.on_navigation_failed("goal cancelled");
+  EXPECT_TRUE(status_of("c1") == ActionStatus::Finished);
 }
 
 TEST_F(OrderManagerTest, NewOrderIsAcceptedAfterCancel)
