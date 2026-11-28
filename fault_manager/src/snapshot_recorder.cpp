@@ -160,7 +160,7 @@ void SnapshotRecorder::write(const Pending & pending)
       rosbag2_cpp::Writer writer;
       writer.open(directory.string());  // creates the directory; fails if it exists
       for (const Entry & entry : buffer_) {
-        writer.write(*entry.message, entry.topic, entry.type, entry.stamp);
+        writer.write(entry.message, entry.topic, entry.type, entry.stamp);
         ++written;
       }
     }  // closing the writer finishes the bag and writes metadata.yaml

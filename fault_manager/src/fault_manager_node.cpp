@@ -113,8 +113,8 @@ FaultManagerNode::FaultManagerNode(const rclcpp::NodeOptions & options)
     capture.post_seconds = get_parameter("capture.post_seconds").as_double();
     capture.max_buffer_bytes = static_cast<std::size_t>(
       std::max<std::int64_t>(1, get_parameter("capture.max_buffer_mb").as_int())) * 1024u * 1024u;
-    capture.max_bags =
-      static_cast<std::size_t>(std::max<std::int64_t>(0, get_parameter("capture.max_bags").as_int()));
+    const std::int64_t max_bags = get_parameter("capture.max_bags").as_int();
+    capture.max_bags = static_cast<std::size_t>(std::max<std::int64_t>(0, max_bags));
     const std::string min_severity = get_parameter("capture.min_severity").as_string();
     const std::optional<fault_core::Severity> parsed =
       fault_core::severity_from_string(min_severity);
